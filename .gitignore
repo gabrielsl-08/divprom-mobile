@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Flutter / build artifacts (2GB+)
+build/
+packages/
+*.apk
+
+# Banco de dados local
+*.db
+
+# Assets gerados / temporários
+*.pdf

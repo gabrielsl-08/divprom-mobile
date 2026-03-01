@@ -1,0 +1,47 @@
+[project]
+name = "divprom-mobile"
+version = "1.0.0"
+description = "Aplicativo mobile para cadastro de CRR - Comprovante de Remoção/Retenção"
+authors = [
+    {name = "Gabriel"}
+]
+dependencies = [
+    "flet>=0.21.0",
+    "httpx>=0.27.0",
+]
+requires-python = ">=3.8"
+
+[tool.flet]
+# Informações do App
+app.name = "DivProm Mobile"
+app.short_name = "DivProm"
+app.version = "1.0.0"
+app.build_number = 1
+app.description = "Sistema de Cadastro de CRR para fiscalização de trânsito"
+
+# Configurações Android para Play Store
+android.package = "com.divprom.mobile"
+android.adaptive_icon_background = "#1976D2"
+
+# Versão mínima do Android (API 24 = Android 7.0)
+android.min_sdk_version = 24
+android.target_sdk_version = 34
+
+# Permissões Android
+android.permissions = [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.CAMERA",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.WRITE_EXTERNAL_STORAGE",
+    "android.permission.READ_MEDIA_IMAGES",
+]
+
+# Ícone do app (crie um PNG 512x512 em assets/icon.png)
+# app.icon = "assets/icon.png"
+
+# Splash screen (opcional)
+# app.splash_color = "#1976D2"
+
+# Excluir pastas desnecessarias do build
+app.exclude = ["packages", "build", ".git", ".claude", "__pycache__", "nul", "build_apk.py", "build_apk.bat"]
