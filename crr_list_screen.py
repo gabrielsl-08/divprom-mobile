@@ -277,7 +277,8 @@ def build_crr_list_screen(page: ft.Page, on_voltar, api_client, local_db, print_
                     ft.IconButton(icon=ft.Icons.REFRESH, icon_color=ft.Colors.WHITE,
                                   on_click=carregar_crrs),
                 ]),
-                bgcolor=ft.Colors.BLUE, padding=15,
+                bgcolor=ft.Colors.BLUE,
+                padding=ft.padding.only(top=40, left=10, right=10, bottom=12),
             ),
             ft.Container(
                 content=ft.Row(controls=[

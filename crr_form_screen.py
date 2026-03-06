@@ -34,10 +34,6 @@ def build_crr_form_screen(
     def aplicar_mascara_placa(e):
         raw = e.control.value.upper().replace("-", "").replace(" ", "")
         # Formato: LLL-NXNN (L=letra, N=numero, X=letra ou numero)
-        # Pos 0-2: somente letras
-        # Pos 3: somente numero
-        # Pos 4: letra ou numero
-        # Pos 5-6: somente numero
         resultado = ""
         for i, c in enumerate(raw):
             if i < 3:
@@ -65,14 +61,9 @@ def build_crr_form_screen(
         if len(resultado) > 3:
             resultado = resultado[:3] + "-" + resultado[3:]
         e.control.value = resultado
-        # Apos 3 letras (+ traco), mudar para teclado numerico
-        letras = len([c for c in resultado if c.isalpha()])
-        if letras >= 3:
-            e.control.keyboard_type = ft.KeyboardType.NUMBER
-            e.control.capitalization = ft.TextCapitalization.NONE
-        else:
-            e.control.keyboard_type = ft.KeyboardType.TEXT
-            e.control.capitalization = ft.TextCapitalization.CHARACTERS
+        # Teclado igual ao campo senha (VISIBLE_PASSWORD): letras + numeros, sem sugestões
+        e.control.keyboard_type = ft.KeyboardType.VISIBLE_PASSWORD
+        e.control.capitalization = ft.TextCapitalization.CHARACTERS
         e.control.update()
 
     def forcar_maiusculo(e):
@@ -84,6 +75,17 @@ def build_crr_form_screen(
         valor = e.control.value.upper().replace(" ", "")
         valor = ''.join(c for c in valor if c.isalnum())[:20]
         e.control.value = valor
+        e.control.update()
+
+    def aplicar_mascara_data(e):
+        raw = ''.join(c for c in e.control.value if c.isdigit())[:8]
+        if len(raw) > 4:
+            resultado = raw[:2] + '/' + raw[2:4] + '/' + raw[4:]
+        elif len(raw) > 2:
+            resultado = raw[:2] + '/' + raw[2:]
+        else:
+            resultado = raw
+        e.control.value = resultado
         e.control.update()
 
     def aplicar_mascara_enquadramento(e):
@@ -141,6 +143,7 @@ def build_crr_form_screen(
     placa = ft.TextField(
         label="Placa *", prefix_icon=ft.Icons.DIRECTIONS_CAR,
         border_radius=8, capitalization=ft.TextCapitalization.CHARACTERS,
+        keyboard_type=ft.KeyboardType.VISIBLE_PASSWORD,
         max_length=8, on_change=aplicar_mascara_placa,
     )
     marca = ft.TextField(label="Marca *", border_radius=8, max_length=20, capitalization=ft.TextCapitalization.CHARACTERS, on_change=forcar_maiusculo)
@@ -168,8 +171,10 @@ def build_crr_form_screen(
         capitalization=ft.TextCapitalization.CHARACTERS, on_change=forcar_maiusculo,
     )
     data_fiscalizacao = ft.TextField(
-        label="Data *", value=datetime.now().strftime("%Y-%m-%d"),
+        label="Data *", value=datetime.now().strftime("%d/%m/%Y"),
         prefix_icon=ft.Icons.CALENDAR_TODAY, border_radius=8,
+        keyboard_type=ft.KeyboardType.NUMBER,
+        on_change=aplicar_mascara_data,
     )
     hora_fiscalizacao = ft.TextField(
         label="Hora *", value=datetime.now().strftime("%H:%M"),
@@ -195,7 +200,7 @@ def build_crr_form_screen(
             border_radius=8,
         )
         campo_num = ft.TextField(
-            label=f"AIT {numero}", hint_text="0123456",
+            label=f"Auto de Infração {numero}", hint_text="0123456",
             border_radius=8, max_length=7,
             keyboard_type=ft.KeyboardType.NUMBER,
             on_change=lambda e: setattr(e.control, 'value', ''.join(c for c in e.control.value if c.isdigit())[:7]) or e.control.update(),
@@ -294,6 +299,7 @@ def build_crr_form_screen(
 
     placa_guincho = ft.TextField(
         label="Placa do Guincho", border_radius=8, max_length=8,
+        keyboard_type=ft.KeyboardType.VISIBLE_PASSWORD,
         on_change=aplicar_mascara_placa, capitalization=ft.TextCapitalization.CHARACTERS,
     )
     encarregado = ft.TextField(label="Encarregado", border_radius=8, max_length=50, capitalization=ft.TextCapitalization.CHARACTERS, on_change=forcar_maiusculo)
@@ -698,19 +704,27 @@ def build_crr_form_screen(
                 aits.append(f"{prefixo}-{num.strip()}")
         enquadramentos = [f.value.strip() for f in enq_fields if f.value and f.value.strip()]
         local_patio_valor = local_patio_opcao.value
+
+        # Converte DD/MM/AAAA -> AAAA-MM-DD para a API
+        data_raw = data_fiscalizacao.value or ''
+        try:
+            data_iso = datetime.strptime(data_raw, "%d/%m/%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            data_iso = data_raw
+
         return {
             'numeroCrr': numero_crr.value,
-            'placa': placa.value or '', 'chassi': chassi.value or '',
+            'placa': (placa.value or '').replace('-', ''), 'chassi': chassi.value or '',
             'marca': marca.value or '', 'modelo': modelo.value or '', 'cor': cor.value or '',
             'veiculoSemIdentificacao': veiculo_sem_id.value,
             'nomeCondutor': nome_condutor.value or '', 'cpfCondutor': cpf_condutor.value or '',
             'cnh': cnh.value or '', 'cnhEstrangeira': cnh_estrangeira.value or '',
             'localFiscalizacao': local_fiscalizacao.value or '',
-            'dataFiscalizacao': data_fiscalizacao.value or '',
+            'dataFiscalizacao': data_iso,
             'horaFiscalizacao': hora_fiscalizacao.value or '',
             'medidaAdministrativa': medida_administrativa.value or '',
             'localPatio': local_patio_valor,
-            'placaGuincho': placa_guincho.value or '',
+            'placaGuincho': (placa_guincho.value or '').replace('-', ''),
             'encarregado': encarregado.value or '',
             'matriculaAgente': matricula_agente.value or '',
             'observacao': observacao.value or '',
@@ -756,18 +770,14 @@ def build_crr_form_screen(
         nonlocal dados_salvo
         dados_salvo = dados
         numero = dados.get('numeroCrr', '')
-        SEM_IMPRESSAO = {'Recusou assinar e a receber 2a via', 'Condutor ausente'}
-        pode_imprimir = dados.get('situacaoEntrega') not in SEM_IMPRESSAO
 
-        acoes = []
-        if pode_imprimir:
-            acoes.append(
-                ft.ElevatedButton(
-                    "Imprimir", icon=ft.Icons.PRINT, on_click=imprimir_crr_click,
-                    style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
-                )
-            )
-        acoes.append(ft.TextButton("Fechar", on_click=fechar_dialogo_salvo))
+        acoes = [
+            ft.ElevatedButton(
+                "Imprimir", icon=ft.Icons.PRINT, on_click=imprimir_crr_click,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
+            ),
+            ft.TextButton("Fechar", on_click=fechar_dialogo_salvo),
+        ]
 
         dlg = ft.AlertDialog(
             title=ft.Row([

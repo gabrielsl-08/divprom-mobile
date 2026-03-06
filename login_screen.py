@@ -165,14 +165,6 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
             page.update()
             return
 
-        matricula_ativacao = cred.get('identificador', '')
-        if matricula != matricula_ativacao:
-            status_text.value = "Matricula incorreta"
-            status_text.color = ft.Colors.RED
-            loading.visible = False
-            page.update()
-            return
-
         try:
             resultado = api_client.validar_login(
                 cred['api_key'], matricula, senha
@@ -193,6 +185,8 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
 
         api_client.set_api_key(cred['api_key'])
         api_client.set_matricula(matricula)
+        # Atualiza matricula armazenada para o agente atual (qualquer agente pode usar qualquer dispositivo)
+        local_db.salvar_config('identificador', matricula)
 
         from datetime import datetime
         local_db.salvar_config('sessao_inicio', datetime.now().isoformat())

@@ -172,7 +172,8 @@ def build_crr_search_screen(page: ft.Page, on_voltar, api_client, local_db, prin
                         on_click=limpar_filtros,
                     ),
                 ]),
-                bgcolor=ft.Colors.INDIGO, padding=15,
+                bgcolor=ft.Colors.INDIGO,
+                padding=ft.padding.only(top=40, left=10, right=10, bottom=12),
             ),
             # Filtros
             ft.Container(
