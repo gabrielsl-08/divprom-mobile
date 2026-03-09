@@ -14,7 +14,7 @@ from crr_search_screen import build_crr_search_screen
 from android_print_service import AndroidPrintService
 
 
-API_BASE_URL = "http://192.168.47.20:8000/api/v1/mobile"
+API_BASE_URL = "https://systrafcrr-60e7e480b649.herokuapp.com/api/v1/mobile"
 
 
 async def main(page: ft.Page):

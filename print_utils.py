@@ -58,6 +58,10 @@ def gerar_linhas_impressao(dados):
     situacao = dados.get('situacaoEntrega', '')
     if situacao:
         linhas.append(situacao)
+    linhas.append(DIV)
+    linhas.append("Para liberacao do veiculo")
+    linhas.append("removido, acesse:")
+    linhas.append("__QR_CODE__")
     linhas.append(SEP)
     return linhas
 
