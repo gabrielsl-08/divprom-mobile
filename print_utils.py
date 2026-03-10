@@ -30,10 +30,13 @@ def gerar_linhas_impressao(dados):
     linhas.append(DIV)
     aits_v = dados.get('aits', [])
     if aits_v:
-        linhas.append(f"  AITs: {', '.join(a.upper() for a in aits_v)}")
+        aits_str = ', '.join(a.upper() for a in aits_v)
+        linhas.append(f"  AITs: {aits_str}")
     enquadr = dados.get('enquadramentos', [])
     if enquadr:
         linhas.append(f"  ENQUADR.: {', '.join(enquadr)}")
+    if dados.get('veiculoAbandonado', False):
+        linhas.append("  ART.279 - ABANDONADO")
     linhas.append(DIV)
     linhas.append("OUTROS DADOS:")
     linhas.append(f"  PATIO: {dados.get('localPatio', '').upper()}")

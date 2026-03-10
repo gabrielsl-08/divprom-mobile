@@ -434,7 +434,6 @@ def build_crr_form_screen(
     imagens_capturadas = []  # lista de dicts {path, base64}
 
     imagens_grid = ft.Column(controls=[], spacing=10)
-    imagens_contador = ft.Text("0 / 4 imagens", size=13, color=ft.Colors.GREY_600)
 
     def atualizar_grid_imagens():
         novos_cards = []
@@ -466,7 +465,6 @@ def build_crr_form_screen(
         # Reatribuição dispara o rastreamento de mudanças do Flet
         imagens_grid.controls = novos_cards
         qtd = len(imagens_capturadas)
-        imagens_contador.value = f"{qtd} / {MAX_IMAGENS} imagens"
         btn_camera.visible = qtd < MAX_IMAGENS
         btn_galeria.visible = qtd < MAX_IMAGENS
         page.update()
@@ -526,7 +524,6 @@ def build_crr_form_screen(
                 ft.Text("Imagens", size=18, weight=ft.FontWeight.BOLD),
                 ft.Text("Capture ate 4 fotos (opcional)", size=12, color=ft.Colors.GREY_600),
                 ft.Container(height=5),
-                imagens_contador,
                 ft.Container(height=10),
                 ft.Row([btn_camera, btn_galeria], spacing=10),
                 ft.Container(height=10),

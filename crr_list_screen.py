@@ -4,6 +4,7 @@ Tela de listagem de CRRs - somente online.
 Mostra os 10 ultimos CRRs com opcao de reimprimir e editar condutor.
 """
 import flet as ft
+from datetime import datetime
 from print_utils import gerar_linhas_impressao
 from image_picker_service import ImagePickerService
 
@@ -177,7 +178,11 @@ def build_crr_list_screen(page: ft.Page, on_voltar, api_client, local_db, print_
         numero = dados.get('numeroCrr', '---')
         placa_v = dados.get('placa', '---')
         condutor = dados.get('nomeCondutor', '') or 'Ausente'
-        data = dados.get('dataFiscalizacao', '---')
+        data_raw = dados.get('dataFiscalizacao', '')
+        try:
+            data = datetime.strptime(data_raw, '%Y-%m-%d').strftime('%d/%m/%Y')
+        except Exception:
+            data = data_raw or '---'
         hora = dados.get('horaFiscalizacao', '')
         medida = dados.get('medidaAdministrativa', '---')
         situacao = dados.get('situacaoEntrega', '')
