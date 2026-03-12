@@ -229,17 +229,15 @@ if "  printing:" not in pubspec:
         "  pdf: ^3.11.0\n  printing: ^5.13.1"
     )
     pubspec_changed = True
-if "datecs_printer: ^0.0.5" not in pubspec:
-    # Remove versao antiga blue_thermal_printer se presente
+if "flutter_bluetooth_serial" not in pubspec:
     import re as _re2
+    # Remove pacotes BT anteriores
     pubspec = _re2.sub(r'\n\s*blue_thermal_printer: \S+', '', pubspec)
-    if "datecs_printer" in pubspec:
-        pubspec = _re2.sub(r'datecs_printer: \S+', 'datecs_printer: ^0.0.5', pubspec)
-    else:
-        pubspec = pubspec.replace(
-            "  printing: ^5.13.1",
-            "  printing: ^5.13.1\n  datecs_printer: ^0.0.5"
-        )
+    pubspec = _re2.sub(r'\n\s*datecs_printer: \S+', '', pubspec)
+    pubspec = pubspec.replace(
+        "  printing: ^5.13.1",
+        "  printing: ^5.13.1\n  flutter_bluetooth_serial: ^0.4.0"
+    )
     pubspec_changed = True
 if pubspec_changed:
     with open(pubspec_path, "w", encoding="utf-8") as f:
@@ -466,7 +464,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flet/flet.dart';
-import 'package:datecs_printer/datecs_printer.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 
 class BluetoothPrinterFletService extends FletService {
   BluetoothPrinterFletService({required super.control});
@@ -475,13 +473,12 @@ class BluetoothPrinterFletService extends FletService {
   void init() {
     super.init();
     control.addInvokeMethodListener(_invokeMethod);
-    debugPrint("BluetoothPrinterFletService initialized");
+    debugPrint("BluetoothPrinterFletService (ESC/POS) initialized");
   }
 
   @override
   void dispose() {
     control.removeInvokeMethodListener(_invokeMethod);
-    DatecsPrinter.disconnect;
     super.dispose();
   }
 
@@ -498,10 +495,11 @@ class BluetoothPrinterFletService extends FletService {
 
   Future<dynamic> _listarPareados() async {
     try {
-      List<dynamic> devices = await DatecsPrinter.getListBluetoothDevice;
+      List<BluetoothDevice> devices =
+          await FlutterBluetoothSerial.instance.getBondedDevices();
       return devices.map((d) => {
-        "nome": (d['name'] ?? d.name ?? "").toString(),
-        "mac":  (d['address'] ?? d.address ?? "").toString(),
+        "nome": d.name ?? "",
+        "mac": d.address,
       }).toList();
     } catch (e) {
       debugPrint("Erro ao listar pareados: $e");
@@ -509,28 +507,99 @@ class BluetoothPrinterFletService extends FletService {
     }
   }
 
-  /// Redimensiona imagem base64 para metade da largura e 1/3 da altura.
-  Future<String> _resizeSig(String base64Str) async {
+  // ── ESC/POS constants ─────────────────────────────────────────────────────
+  static const List<int> _INIT     = [0x1B, 0x40];
+  static const List<int> _ALIGN_L  = [0x1B, 0x61, 0x00];
+  static const List<int> _ALIGN_C  = [0x1B, 0x61, 0x01];
+  static const List<int> _BOLD_ON  = [0x1B, 0x45, 0x01];
+  static const List<int> _BOLD_OFF = [0x1B, 0x45, 0x00];
+  static const List<int> _LF      = [0x0A];
+  static const List<int> _CUT     = [0x1D, 0x56, 0x42, 0x03];
+  static List<int> _feedLines(int n) => [0x1B, 0x64, n];
+
+  List<int> _encode(String text) =>
+      text.codeUnits.map((c) => c > 255 ? 63 : c).toList();
+
+  List<int> _textLine(String text, {bool center = false, bool bold = false}) {
+    final List<int> buf = [];
+    if (center) buf.addAll(_ALIGN_C);
+    if (bold) buf.addAll(_BOLD_ON);
+    buf.addAll(_encode(text));
+    buf.addAll(_LF);
+    if (bold) buf.addAll(_BOLD_OFF);
+    if (center) buf.addAll(_ALIGN_L);
+    return buf;
+  }
+
+  // ── Image → ESC/POS raster (GS v 0) ──────────────────────────────────────
+  Future<List<int>> _imageToEscpos(String base64Str,
+      {int? targetWidth, int? targetHeight}) async {
+    try {
+      final Uint8List bytes = base64Decode(base64Str);
+      final ui.Codec codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+      );
+      final ui.FrameInfo fi = await codec.getNextFrame();
+      final int w = fi.image.width;
+      final int h = fi.image.height;
+      final ByteData? bd =
+          await fi.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      fi.image.dispose();
+      if (bd == null) return [];
+
+      final Uint8List rgba = bd.buffer.asUint8List();
+      final int bytesPerRow = (w + 7) ~/ 8;
+      final List<int> bitmap = [];
+
+      for (int y = 0; y < h; y++) {
+        for (int bx = 0; bx < bytesPerRow; bx++) {
+          int byte = 0;
+          for (int bit = 0; bit < 8; bit++) {
+            final int px = bx * 8 + bit;
+            if (px < w) {
+              final int offset = (y * w + px) * 4;
+              final int r = rgba[offset];
+              final int g = rgba[offset + 1];
+              final int b = rgba[offset + 2];
+              final int lum = (r * 299 + g * 587 + b * 114) ~/ 1000;
+              if (lum < 128) byte |= (0x80 >> bit);
+            }
+          }
+          bitmap.add(byte);
+        }
+      }
+
+      return [
+        0x1D, 0x76, 0x30, 0x00,
+        bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF,
+        h & 0xFF, (h >> 8) & 0xFF,
+        ...bitmap,
+      ];
+    } catch (e) {
+      debugPrint("Erro ao converter imagem ESC/POS: $e");
+      return [];
+    }
+  }
+
+  Future<List<int>> _sigToEscpos(String base64Str) async {
     try {
       final Uint8List bytes = base64Decode(base64Str);
       final ui.Codec c1 = await ui.instantiateImageCodec(bytes);
       final ui.FrameInfo f1 = await c1.getNextFrame();
-      final int w = (f1.image.width * 0.5).round();
-      final int h = (f1.image.height * 0.33).round();
+      final int origW = f1.image.width;
+      final int origH = f1.image.height;
       f1.image.dispose();
-      final ui.Codec c2 = await ui.instantiateImageCodec(
-        bytes, targetWidth: w, targetHeight: h,
-      );
-      final ui.FrameInfo f2 = await c2.getNextFrame();
-      final ByteData? bd = await f2.image.toByteData(format: ui.ImageByteFormat.png);
-      f2.image.dispose();
-      if (bd == null) return base64Str;
-      return base64Encode(bd.buffer.asUint8List());
+      return await _imageToEscpos(base64Str,
+          targetWidth: (origW * 0.5).round(),
+          targetHeight: (origH * 0.33).round());
     } catch (_) {
-      return base64Str;
+      return [];
     }
   }
 
+  // ── Print receipt ─────────────────────────────────────────────────────────
   Future<dynamic> _printReceipt(dynamic args) async {
     final String mac = (args["mac_address"] ?? "").toString().toUpperCase();
     final List<dynamic> lines = args["lines"] ?? [];
@@ -541,67 +610,65 @@ class BluetoothPrinterFletService extends FletService {
       return {"sucesso": false, "erro": "MAC da impressora nao configurado"};
     }
 
+    BluetoothConnection? conn;
     try {
-      // Desconecta antes para garantir conexao com dispositivo correto
-      try { await DatecsPrinter.disconnect; } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 400));
+      conn = await BluetoothConnection.toAddress(mac);
+      await Future.delayed(const Duration(milliseconds: 300));
 
-      bool connected = false;
-      try {
-        connected = await DatecsPrinter.connectBluetooth(mac) ?? false;
-      } catch (e) {
-        final msg = e.toString().toLowerCase();
-        if (msg.contains("connect") || msg.contains("ioexception") || msg.contains("read failed")) {
-          return {"sucesso": false, "erro": "Impressora desligada ou fora de alcance"};
-        }
-        return {"sucesso": false, "erro": "Falha ao conectar com $mac"};
-      }
+      final List<int> buf = [];
+      buf.addAll(_INIT);
+      buf.addAll(_ALIGN_L);
 
-      if (!connected) {
-        return {"sucesso": false, "erro": "Nao foi possivel conectar a impressora"};
-      }
-
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      final DatecsGenerate gen = DatecsGenerate(DatecsPaper.mm58);
       for (final line in lines) {
         final String s = line.toString();
+
         if (s == "__AGENTE_SIG__") {
-          if (agentSig.isNotEmpty) {
-            final String sig = await _resizeSig(agentSig);
-            gen.image(sig);
-          }
-          gen.feed(2);
+          if (agentSig.isNotEmpty) buf.addAll(await _sigToEscpos(agentSig));
+          buf.addAll(_feedLines(2));
+
         } else if (s == "__SPACER__") {
-          gen.feed(3);
+          buf.addAll(_feedLines(3));
+
         } else if (s == "__QR_STATIC__") {
-          if (qrBase64.isNotEmpty) gen.image(qrBase64);
+          if (qrBase64.isNotEmpty) {
+            buf.addAll(await _imageToEscpos(qrBase64, targetWidth: 200));
+          }
+
         } else if (s.startsWith("__CENTRO__")) {
-          final String txt = s.substring(10);
-          final int pad = ((32 - txt.length) / 2).floor().clamp(0, 16);
-          gen.textPrint(' ' * pad + txt, style: DatecsStyle(bold: true));
-        } else if (s.isNotEmpty && s.split('').every((c) => c == s[0]) && '-=_'.contains(s[0])) {
-          gen.hr(char: s[0]);
+          buf.addAll(_textLine(s.substring(10), center: true, bold: true));
+
+        } else if (s.isNotEmpty &&
+            s.split('').every((c) => c == s[0]) &&
+            '-=_'.contains(s[0])) {
+          buf.addAll(_encode(s));
+          buf.addAll(_LF);
+
         } else if (s.trim().isEmpty) {
-          gen.feed(1);
+          buf.addAll(_LF);
+
         } else {
-          gen.textPrint(s);
+          buf.addAll(_encode(s));
+          buf.addAll(_LF);
         }
       }
-      gen.feed(5);
 
-      final bool printed = await DatecsPrinter.printText(gen.args) ?? false;
+      buf.addAll(_feedLines(5));
+      buf.addAll(_CUT);
 
-      try { await DatecsPrinter.disconnect; } catch (_) {}
+      conn.output.add(Uint8List.fromList(buf));
+      await conn.output.allSent;
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      if (printed) {
-        return {"sucesso": true};
-      } else {
-        return {"sucesso": false, "erro": "Impressora nao confirmou a impressao"};
-      }
+      return {"sucesso": true};
     } catch (e) {
-      debugPrint("Erro ao imprimir via BT: $e");
-      return {"sucesso": false, "erro": "Erro na impressao: ${e.toString().split("\\n").first}"};
+      debugPrint("Erro ao imprimir via BT ESC/POS: $e");
+      final msg = e.toString().toLowerCase();
+      if (msg.contains("connect") || msg.contains("socket") || msg.contains("host")) {
+        return {"sucesso": false, "erro": "Impressora desligada ou fora de alcance"};
+      }
+      return {"sucesso": false, "erro": "Erro: ${e.toString().split("\n").first}"};
+    } finally {
+      try { conn?.dispose(); } catch (_) {}
     }
   }
 }
@@ -662,30 +729,30 @@ with open(main_dart_path, "w", encoding="utf-8") as f:
     f.write(main_dart)
 print("  -> main.dart modificado com ImagePicker + AndroidPrint extensions")
 
-# 2c2. Patch datecs_printer: adiciona namespace ao build.gradle no pub cache
-_dt_gradle = os.path.join(
+# 2c2. Patch flutter_bluetooth_serial: namespace no build.gradle
+_fbs_gradle = os.path.join(
     os.environ.get('LOCALAPPDATA', ''),
     'Pub', 'Cache', 'hosted', 'pub.dev',
-    'datecs_printer-0.0.5', 'android', 'build.gradle',
+    'flutter_bluetooth_serial-0.4.0', 'android', 'build.gradle',
 )
-if os.path.exists(_dt_gradle):
-    with open(_dt_gradle, 'r', encoding='utf-8') as _f:
-        _dg = _f.read()
-    _dg_changed = False
-    if 'namespace' not in _dg:
-        _dg = _dg.replace('android {', 'android {\n    namespace "com.rezins.datecs_printer"', 1)
-        _dg_changed = True
-    if 'compileSdkVersion 30' in _dg:
-        _dg = _dg.replace('compileSdkVersion 30', 'compileSdkVersion 34')
-        _dg_changed = True
-    if _dg_changed:
-        with open(_dt_gradle, 'w', encoding='utf-8') as _f:
-            _f.write(_dg)
-        print("  -> datecs_printer build.gradle corrigido (namespace + compileSdk 34)")
+if os.path.exists(_fbs_gradle):
+    with open(_fbs_gradle, 'r', encoding='utf-8') as _f:
+        _fbsg = _f.read()
+    _fbsg_changed = False
+    if 'namespace' not in _fbsg:
+        _fbsg = _fbsg.replace(
+            'android {',
+            'android {\n    namespace "com.dexterx.flutter_bluetooth_serial"', 1
+        )
+        _fbsg_changed = True
+    if _fbsg_changed:
+        with open(_fbs_gradle, 'w', encoding='utf-8') as _f:
+            _f.write(_fbsg)
+        print("  -> flutter_bluetooth_serial build.gradle corrigido (namespace)")
     else:
-        print("  -> datecs_printer build.gradle ja esta correto")
+        print("  -> flutter_bluetooth_serial build.gradle ja esta correto")
 else:
-    print(f"  -> AVISO: datecs_printer nao encontrado no pub cache: {_dt_gradle}")
+    print(f"  -> AVISO: flutter_bluetooth_serial nao encontrado no pub cache")
 
 # 2d. Restaurar app.zip corrigido (caso flutter build o recrie)
 shutil.copy2(app_zip_backup, app_zip_path)
