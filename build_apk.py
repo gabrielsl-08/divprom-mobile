@@ -461,7 +461,10 @@ print("  -> android_print_service.dart criado")
 
 # 2b3. Criar servico Dart para Bluetooth ESC/POS direto
 bluetooth_service_dart_path = os.path.join(flutter_dir, "lib", "bluetooth_printer_service.dart")
-bluetooth_service_code = r'''import 'package:flutter/foundation.dart';
+bluetooth_service_code = r'''import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flet/flet.dart';
 import 'package:datecs_printer/datecs_printer.dart';
 
@@ -506,6 +509,28 @@ class BluetoothPrinterFletService extends FletService {
     }
   }
 
+  /// Redimensiona imagem base64 para metade da largura e 1/3 da altura.
+  Future<String> _resizeSig(String base64Str) async {
+    try {
+      final Uint8List bytes = base64Decode(base64Str);
+      final ui.Codec c1 = await ui.instantiateImageCodec(bytes);
+      final ui.FrameInfo f1 = await c1.getNextFrame();
+      final int w = (f1.image.width * 0.5).round();
+      final int h = (f1.image.height * 0.33).round();
+      f1.image.dispose();
+      final ui.Codec c2 = await ui.instantiateImageCodec(
+        bytes, targetWidth: w, targetHeight: h,
+      );
+      final ui.FrameInfo f2 = await c2.getNextFrame();
+      final ByteData? bd = await f2.image.toByteData(format: ui.ImageByteFormat.png);
+      f2.image.dispose();
+      if (bd == null) return base64Str;
+      return base64Encode(bd.buffer.asUint8List());
+    } catch (_) {
+      return base64Str;
+    }
+  }
+
   Future<dynamic> _printReceipt(dynamic args) async {
     final String mac = (args["mac_address"] ?? "").toString().toUpperCase();
     final List<dynamic> lines = args["lines"] ?? [];
@@ -542,7 +567,10 @@ class BluetoothPrinterFletService extends FletService {
       for (final line in lines) {
         final String s = line.toString();
         if (s == "__AGENTE_SIG__") {
-          if (agentSig.isNotEmpty) gen.image(agentSig);
+          if (agentSig.isNotEmpty) {
+            final String sig = await _resizeSig(agentSig);
+            gen.image(sig);
+          }
           gen.feed(2);
         } else if (s == "__SPACER__") {
           gen.feed(3);
@@ -550,7 +578,8 @@ class BluetoothPrinterFletService extends FletService {
           if (qrBase64.isNotEmpty) gen.image(qrBase64);
         } else if (s.startsWith("__CENTRO__")) {
           final String txt = s.substring(10);
-          gen.textPrint(txt, style: DatecsStyle(align: DatecsAlign.center, bold: true));
+          final int pad = ((32 - txt.length) / 2).floor().clamp(0, 16);
+          gen.textPrint(' ' * pad + txt, style: DatecsStyle(bold: true));
         } else if (s.isNotEmpty && s.split('').every((c) => c == s[0]) && '-=_'.contains(s[0])) {
           gen.hr(char: s[0]);
         } else if (s.trim().isEmpty) {

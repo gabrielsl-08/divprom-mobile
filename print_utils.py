@@ -13,8 +13,8 @@ LARGURA = 32
 _BASE_URL = "https://divprom.herokuapp.com"
 
 _ACCENT = str.maketrans(
-    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ',
-    'AAAAEEEEEIIIIOOOOOUUUUCNaaaaeeeeeiiiiooooouuuucn'
+    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ°ª',
+    'AAAAEEEEEIIIIOOOOOUUUUCNaaaaeeeeeiiiiooooouuuucnoa'
 )
 
 
@@ -65,7 +65,8 @@ def gerar_linhas_impressao(dados):
     )
 
     # === Titulo principal ===
-    linhas.append("__CENTRO__COMP. RECOLH. E REMOCAO")
+    linhas.append("__CENTRO__COMPROVANTE DE RECOLHIMENTO")
+    linhas.append("__CENTRO__E REMOCAO - CRR")
 
     # === CRR / DATA / HORA ===
     _secao(linhas, "IDENTIFICACAO DO CRR", DIV)
