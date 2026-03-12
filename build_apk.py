@@ -550,7 +550,7 @@ class BluetoothPrinterFletService extends FletService {
           if (qrBase64.isNotEmpty) gen.image(qrBase64);
         } else if (s.startsWith("__CENTRO__")) {
           final String txt = s.substring(10);
-          gen.textPrint(txt, style: const DatecsStyle(align: DatecsAlign.center, bold: true));
+          gen.textPrint(txt, style: DatecsStyle(align: DatecsAlign.center, bold: true));
         } else if (s.isNotEmpty && s.split('').every((c) => c == s[0]) && '-=_'.contains(s[0])) {
           gen.hr(char: s[0]);
         } else if (s.trim().isEmpty) {
