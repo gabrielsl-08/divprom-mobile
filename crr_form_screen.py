@@ -3,11 +3,12 @@
 Tela de formulario para cadastro de CRR - Layout Carrossel.
 Modo online apenas.
 """
+import asyncio
 import flet as ft
-import base64
 from datetime import datetime
-from print_utils import gerar_texto_impressao, gerar_linhas_impressao
+from print_utils import gerar_linhas_impressao
 from image_picker_service import ImagePickerService
+from print_dialog import mostrar_dialogo_impressao
 
 
 def build_crr_form_screen(
@@ -24,8 +25,6 @@ def build_crr_form_screen(
         "Outros Dados", "Condutor", "Imagens", "Revisao"
     ]
 
-    # Obtem proximo numero do servidor
-    proximo = "Carregando..."
     credenciais = local_db.obter_credenciais()
     matricula_usuario = credenciais.get('identificador', '') if credenciais else ''
 
@@ -117,26 +116,6 @@ def build_crr_form_screen(
             e.control.update()
 
     # ==================== CAMPOS DO FORMULARIO ==================== #
-
-    numero_crr = ft.TextField(
-        label="Numero CRR", value=proximo, read_only=True,
-        prefix_icon=ft.Icons.TAG, border_radius=8,
-    )
-
-    # Carrega proximo numero do servidor
-    def carregar_proximo_numero():
-        try:
-            resultado = api_client.obter_proximo_numero()
-            if resultado.get('sucesso'):
-                numero_crr.value = resultado['proximo_numero']
-            else:
-                numero_crr.value = "SEM LOTE"
-            page.update()
-        except Exception:
-            numero_crr.value = "ERRO"
-            page.update()
-
-    carregar_proximo_numero()
 
     # Pagina 1: Veiculo
     veiculo_sem_id = ft.Checkbox(label="Veiculo s/ identificacao", value=False)
@@ -652,8 +631,6 @@ def build_crr_form_screen(
 
     def validar_campos():
         erros = []
-        if numero_crr.value in ("SEM LOTE", "ERRO", "Carregando..."):
-            erros.append("Sem numero CRR disponivel")
         if not veiculo_sem_id.value:
             if not placa.value:
                 erros.append("Placa e obrigatoria")
@@ -710,7 +687,7 @@ def build_crr_form_screen(
             data_iso = data_raw
 
         return {
-            'numeroCrr': numero_crr.value,
+            'numeroCrr': '',
             'placa': (placa.value or '').replace('-', ''), 'chassi': chassi.value or '',
             'marca': marca.value or '', 'modelo': modelo.value or '', 'cor': cor.value or '',
             'veiculoSemIdentificacao': veiculo_sem_id.value,
@@ -750,15 +727,13 @@ def build_crr_form_screen(
         condutor_sig = dados_salvo.get('assinaturaCondutor', '')
 
         async def _imprimir():
-            if print_service:
-                try:
-                    await print_service.print_receipt(
-                        lines=lines,
-                        signature_base64=sig_b64,
-                        condutor_signature_base64=condutor_sig,
-                    )
-                except Exception:
-                    pass
+            await mostrar_dialogo_impressao(
+                page=page,
+                print_service=print_service,
+                lines=lines,
+                signature_base64=sig_b64,
+                condutor_signature_base64=condutor_sig,
+            )
             on_salvar(dados_salvo, True)
 
         page.run_task(_imprimir)
@@ -792,9 +767,10 @@ def build_crr_form_screen(
         dlg.open = True
         page.update()
 
-    def salvar_crr(e):
+    async def salvar_crr(e):
         if not validar_campos():
             return
+        btn_salvar.disabled = True
         loading.visible = True
         status_text.value = "Salvando..."
         status_text.color = ft.Colors.BLUE
@@ -803,11 +779,16 @@ def build_crr_form_screen(
         dados = obter_dados_formulario()
 
         try:
-            resultado = api_client.criar_crr(dados)
+            resultado = await asyncio.to_thread(api_client.criar_crr, dados)
             if resultado.get('sucesso'):
+                dados['numeroCrr'] = (
+                    resultado.get('crr', {}).get('numeroCrr', '')
+                    or resultado.get('numeroCrr', '')
+                )
                 status_text.value = f"CRR {dados['numeroCrr']} salvo!"
                 status_text.color = ft.Colors.GREEN
                 loading.visible = False
+                btn_salvar.disabled = False
                 page.update()
                 mostrar_dialogo_pos_salvar(dados)
             else:
@@ -815,11 +796,13 @@ def build_crr_form_screen(
                 status_text.value = str(erro)
                 status_text.color = ft.Colors.RED
                 loading.visible = False
+                btn_salvar.disabled = False
                 page.update()
         except Exception:
             status_text.value = "Sem conexao com o servidor"
             status_text.color = ft.Colors.RED
             loading.visible = False
+            btn_salvar.disabled = False
             page.update()
 
     # ==================== BOTOES DE NAVEGACAO ==================== #

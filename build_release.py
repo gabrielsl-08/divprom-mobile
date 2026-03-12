@@ -44,6 +44,10 @@ APP_PYTHON_FILES = [
     "print_utils.py",
     "android_print_service.py",
     "image_picker_service.py",
+    "bluetooth_print_service.py",
+    "bluetooth_escpos_service.py",
+    "print_dialog.py",
+    "qrcode.jpeg",
 ]
 
 FLUTTER_EXE = shutil.which("flutter") or r"C:\Users\gabriel\flutter\3.38.6\bin\flutter.bat"

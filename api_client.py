@@ -66,15 +66,6 @@ class ApiClient:
         except Exception as ex:
             return {'sucesso': False, 'erro': f'Sem conexao: {type(ex).__name__}: {ex}'}
 
-    def obter_proximo_numero(self) -> Dict[str, Any]:
-        """Retorna o proximo numero CRR disponivel."""
-        with httpx.Client(timeout=self.timeout, verify=False) as client:
-            response = client.get(
-                f"{self.base_url}/crr/proximo-numero/",
-                headers=self._get_headers()
-            )
-            return response.json()
-
     def listar_crrs(self) -> Dict[str, Any]:
         """Lista os CRRs criados pelo dispositivo/agente."""
         with httpx.Client(timeout=self.timeout, verify=False) as client:
@@ -86,7 +77,7 @@ class ApiClient:
 
     def criar_crr(self, dados: Dict[str, Any]) -> Dict[str, Any]:
         """Cria um novo CRR no servidor."""
-        with httpx.Client(timeout=self.timeout, verify=False) as client:
+        with httpx.Client(timeout=30.0, verify=False) as client:
             response = client.post(
                 f"{self.base_url}/crr/criar/",
                 json=dados,

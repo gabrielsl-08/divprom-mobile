@@ -191,6 +191,10 @@ if os.path.exists(manifest_path):
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
     ]
     for perm in perms:
         if perm not in manifest:
@@ -224,6 +228,18 @@ if "  printing:" not in pubspec:
         "  pdf: ^3.11.0",
         "  pdf: ^3.11.0\n  printing: ^5.13.1"
     )
+    pubspec_changed = True
+if "datecs_printer: ^0.0.5" not in pubspec:
+    # Remove versao antiga blue_thermal_printer se presente
+    import re as _re2
+    pubspec = _re2.sub(r'\n\s*blue_thermal_printer: \S+', '', pubspec)
+    if "datecs_printer" in pubspec:
+        pubspec = _re2.sub(r'datecs_printer: \S+', 'datecs_printer: ^0.0.5', pubspec)
+    else:
+        pubspec = pubspec.replace(
+            "  printing: ^5.13.1",
+            "  printing: ^5.13.1\n  datecs_printer: ^0.0.5"
+        )
     pubspec_changed = True
 if pubspec_changed:
     with open(pubspec_path, "w", encoding="utf-8") as f:
@@ -443,6 +459,141 @@ with open(android_service_dart_path, "w", encoding="utf-8") as f:
     f.write(android_print_service_code)
 print("  -> android_print_service.dart criado")
 
+# 2b3. Criar servico Dart para Bluetooth ESC/POS direto
+bluetooth_service_dart_path = os.path.join(flutter_dir, "lib", "bluetooth_printer_service.dart")
+bluetooth_service_code = r'''import 'package:flutter/foundation.dart';
+import 'package:flet/flet.dart';
+import 'package:datecs_printer/datecs_printer.dart';
+
+class BluetoothPrinterFletService extends FletService {
+  BluetoothPrinterFletService({required super.control});
+
+  @override
+  void init() {
+    super.init();
+    control.addInvokeMethodListener(_invokeMethod);
+    debugPrint("BluetoothPrinterFletService initialized");
+  }
+
+  @override
+  void dispose() {
+    control.removeInvokeMethodListener(_invokeMethod);
+    DatecsPrinter.disconnect;
+    super.dispose();
+  }
+
+  Future<dynamic> _invokeMethod(String name, dynamic args) async {
+    switch (name) {
+      case "print_receipt":
+        return await _printReceipt(args);
+      case "listar_pareados":
+        return await _listarPareados();
+      default:
+        throw Exception("Unknown BluetoothPrinter method: $name");
+    }
+  }
+
+  Future<dynamic> _listarPareados() async {
+    try {
+      List<dynamic> devices = await DatecsPrinter.getListBluetoothDevice;
+      return devices.map((d) => {
+        "nome": (d['name'] ?? d.name ?? "").toString(),
+        "mac":  (d['address'] ?? d.address ?? "").toString(),
+      }).toList();
+    } catch (e) {
+      debugPrint("Erro ao listar pareados: $e");
+      return [];
+    }
+  }
+
+  Future<dynamic> _printReceipt(dynamic args) async {
+    final String mac = (args["mac_address"] ?? "").toString().toUpperCase();
+    final List<dynamic> lines = args["lines"] ?? [];
+    final String agentSig = (args["signature_base64"] ?? "").toString();
+    final String qrBase64 = (args["qr_base64"] ?? "").toString();
+
+    if (mac.isEmpty) {
+      return {"sucesso": false, "erro": "MAC da impressora nao configurado"};
+    }
+
+    try {
+      // Desconecta antes para garantir conexao com dispositivo correto
+      try { await DatecsPrinter.disconnect; } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      bool connected = false;
+      try {
+        connected = await DatecsPrinter.connectBluetooth(mac) ?? false;
+      } catch (e) {
+        final msg = e.toString().toLowerCase();
+        if (msg.contains("connect") || msg.contains("ioexception") || msg.contains("read failed")) {
+          return {"sucesso": false, "erro": "Impressora desligada ou fora de alcance"};
+        }
+        return {"sucesso": false, "erro": "Falha ao conectar com $mac"};
+      }
+
+      if (!connected) {
+        return {"sucesso": false, "erro": "Nao foi possivel conectar a impressora"};
+      }
+
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      final DatecsGenerate gen = DatecsGenerate(DatecsPaper.mm58);
+      for (final line in lines) {
+        final String s = line.toString();
+        if (s == "__AGENTE_SIG__") {
+          if (agentSig.isNotEmpty) gen.image(agentSig);
+          gen.feed(2);
+        } else if (s == "__SPACER__") {
+          gen.feed(3);
+        } else if (s == "__QR_STATIC__") {
+          if (qrBase64.isNotEmpty) gen.image(qrBase64);
+        } else if (s.startsWith("__CENTRO__")) {
+          final String txt = s.substring(10);
+          gen.textPrint(txt, style: const DatecsStyle(align: DatecsAlign.center, bold: true));
+        } else if (s.isNotEmpty && s.split('').every((c) => c == s[0]) && '-=_'.contains(s[0])) {
+          gen.hr(char: s[0]);
+        } else if (s.trim().isEmpty) {
+          gen.feed(1);
+        } else {
+          gen.textPrint(s);
+        }
+      }
+      gen.feed(5);
+
+      final bool printed = await DatecsPrinter.printText(gen.args) ?? false;
+
+      try { await DatecsPrinter.disconnect; } catch (_) {}
+
+      if (printed) {
+        return {"sucesso": true};
+      } else {
+        return {"sucesso": false, "erro": "Impressora nao confirmou a impressao"};
+      }
+    } catch (e) {
+      debugPrint("Erro ao imprimir via BT: $e");
+      return {"sucesso": false, "erro": "Erro na impressao: ${e.toString().split("\\n").first}"};
+    }
+  }
+}
+
+class BluetoothPrinterFletExtension extends FletExtension {
+  @override
+  void ensureInitialized() {}
+
+  @override
+  FletService? createService(Control control) {
+    if (control.type == "flet_bluetooth_print") {
+      return BluetoothPrinterFletService(control: control);
+    }
+    return null;
+  }
+}
+'''
+with open(bluetooth_service_dart_path, "w", encoding="utf-8") as f:
+    f.write(bluetooth_service_code)
+print("  -> bluetooth_printer_service.dart criado")
+
 # 2c. Modificar main.dart para registrar as extensoes
 with open(main_dart_path, "r", encoding="utf-8") as f:
     main_dart = f.read()
@@ -458,24 +609,54 @@ if "android_print_service.dart" not in main_dart:
         "import \"image_picker_service.dart\";",
         "import \"image_picker_service.dart\";\nimport \"android_print_service.dart\";"
     )
+if "bluetooth_printer_service.dart" not in main_dart:
+    main_dart = main_dart.replace(
+        "import \"android_print_service.dart\";",
+        "import \"android_print_service.dart\";\nimport \"bluetooth_printer_service.dart\";"
+    )
 
 # Adicionar extensoes na lista
 if "ImagePickerFletExtension" not in main_dart:
     import re as _re
     main_dart = _re.sub(
         r'List<FletExtension> extensions = \[[\s\n]*\];',
-        "List<FletExtension> extensions = [\n  ImagePickerFletExtension(),\n  AndroidPrintFletExtension(),\n];",
+        "List<FletExtension> extensions = [\n  ImagePickerFletExtension(),\n  AndroidPrintFletExtension(),\n  BluetoothPrinterFletExtension(),\n];",
         main_dart,
     )
-elif "AndroidPrintFletExtension" not in main_dart:
+elif "BluetoothPrinterFletExtension" not in main_dart:
     main_dart = main_dart.replace(
-        "ImagePickerFletExtension(),\n];",
-        "ImagePickerFletExtension(),\n  AndroidPrintFletExtension(),\n];"
+        "AndroidPrintFletExtension(),\n];",
+        "AndroidPrintFletExtension(),\n  BluetoothPrinterFletExtension(),\n];"
     )
 
 with open(main_dart_path, "w", encoding="utf-8") as f:
     f.write(main_dart)
 print("  -> main.dart modificado com ImagePicker + AndroidPrint extensions")
+
+# 2c2. Patch datecs_printer: adiciona namespace ao build.gradle no pub cache
+_dt_gradle = os.path.join(
+    os.environ.get('LOCALAPPDATA', ''),
+    'Pub', 'Cache', 'hosted', 'pub.dev',
+    'datecs_printer-0.0.5', 'android', 'build.gradle',
+)
+if os.path.exists(_dt_gradle):
+    with open(_dt_gradle, 'r', encoding='utf-8') as _f:
+        _dg = _f.read()
+    _dg_changed = False
+    if 'namespace' not in _dg:
+        _dg = _dg.replace('android {', 'android {\n    namespace "com.rezins.datecs_printer"', 1)
+        _dg_changed = True
+    if 'compileSdkVersion 30' in _dg:
+        _dg = _dg.replace('compileSdkVersion 30', 'compileSdkVersion 34')
+        _dg_changed = True
+    if _dg_changed:
+        with open(_dt_gradle, 'w', encoding='utf-8') as _f:
+            _f.write(_dg)
+        print("  -> datecs_printer build.gradle corrigido (namespace + compileSdk 34)")
+    else:
+        print("  -> datecs_printer build.gradle ja esta correto")
+else:
+    print(f"  -> AVISO: datecs_printer nao encontrado no pub cache: {_dt_gradle}")
 
 # 2d. Restaurar app.zip corrigido (caso flutter build o recrie)
 shutil.copy2(app_zip_backup, app_zip_path)
