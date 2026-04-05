@@ -80,13 +80,14 @@ class BluetoothEscposService:
             print(f"[BT] Erro ao listar pareados: {e}")
             return []
 
-    def imprimir(self, linhas: list[str], mac_address: str) -> dict:
+    def imprimir(self, linhas: list[str], mac_address: str, solucao: int = 1) -> dict:
         """
         Envia conteudo ESC/POS para impressora via Bluetooth.
 
         Args:
             linhas: Lista de strings (cada uma vira uma linha impressa)
             mac_address: MAC da impressora (ex: "AA:BB:CC:DD:EE:FF")
+            solucao: 1 = ESC/POS padrao, 2 = Datecs com Master Reset apos imagens
 
         Returns:
             {'sucesso': True} ou {'sucesso': False, 'erro': str}
@@ -121,8 +122,12 @@ class BluetoothEscposService:
             socket.connect()
             stream = socket.getOutputStream()
 
-            # Monta bytes ESC/POS
-            dados = self._gerar_escpos(linhas)
+            # Monta bytes ESC/POS com base na solucao escolhida
+            if solucao == 2:
+                dados = self._gerar_escpos_solucao2(linhas)
+            else:
+                dados = self._gerar_escpos(linhas)
+            
             stream.write(dados)
             stream.flush()
 
@@ -174,6 +179,67 @@ class BluetoothEscposService:
             # Tokens especiais usados em print_utils.py
             if linha in ('__AGENTE_SIG__', '__SPACER__', '__QR_CODE__'):
                 buf += FEED * 3  # espaco em branco para assinatura/qr manual
+                continue
+
+            if linha in separadores:
+                buf += BOLD_ON
+                buf += linha.encode('ascii', errors='replace') + FEED
+                buf += BOLD_OFF
+            else:
+                buf += linha.encode('latin-1', errors='replace') + FEED
+
+        buf += FEED * 4  # alimenta papel antes de cortar
+        buf += CUT
+        return bytes(buf)
+
+    def _gerar_escpos_solucao2(self, linhas: list[str]) -> bytes:
+        """
+        Solucao 2: Impressao ESC/POS com Master Reset apos imagens.
+
+        PROTOCOLO DATECS COM MASTER RESET:
+        - Apos cada token de imagem (__QR_STATIC__, __AGENTE_SIG__, __CONDUTOR_SIG__),
+          envia ESC @ (0x1B, 0x40) para reiniciar a memoria da impressora.
+        - Isso limpa qualquer "sujeira" deixada pelo SDK da Datecs.
+        
+        Diferenca da Solucao 1:
+        - Nao apenas ajusta espacamento de linha
+        - Envia Master Reset IMEDIATAMENTE apos cada imagem
+        - Reinicializa estado da impressora, garantindo qualidade de saida
+
+        Comandos:
+          ESC @ = Master Reset (0x1B, 0x40) - reinicia memoria da impressora
+          ESC a 1 = centraliza texto
+          ESC a 0 = alinha esquerda
+          GS V 66 = corta papel
+        """
+        ESC = b'\x1b'
+        GS  = b'\x1d'
+
+        INIT       = ESC + b'@'          # Master Reset / Inicializa
+        MASTER_RST = ESC + b'@'          # Master Reset (identico ao INIT) - 0x1B, 0x40
+        ALIGN_CTR  = ESC + b'a\x01'     # centraliza
+        ALIGN_LEFT = ESC + b'a\x00'     # esquerda
+        BOLD_ON    = ESC + b'E\x01'
+        BOLD_OFF   = ESC + b'E\x00'
+        FEED       = b'\n'
+        CUT        = GS  + b'V\x42\x03' # corte parcial com alimentacao
+
+        buf = bytearray()
+        buf += INIT
+        buf += ALIGN_LEFT
+
+        # Tokens de imagem que requerem Master Reset apos processamento
+        TOKENS_IMAGEM = {'__QR_STATIC__', '__AGENTE_SIG__', '__CONDUTOR_SIG__', '__QR_CODE__'}
+        separadores = {'=' * 26, '-' * 26}
+
+        for linha in linhas:
+            # === TOKENS DE IMAGEM: Master Reset apos processamento ===
+            if linha in TOKENS_IMAGEM:
+                # Espaco em branco para a imagem ser impressa manualmente
+                buf += FEED * 3
+                # [SOLUCAO 2] Master Reset apos imagem para limpar sujeira Datecs
+                buf += MASTER_RST
+                buf += FEED * 2  # pequeno espacamento apos reset
                 continue
 
             if linha in separadores:

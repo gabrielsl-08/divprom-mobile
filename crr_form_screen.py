@@ -7,13 +7,12 @@ import asyncio
 import flet as ft
 from datetime import datetime
 from print_utils import gerar_linhas_impressao
-from image_picker_service import ImagePickerService
 from print_dialog import mostrar_dialogo_impressao
 
 
 def build_crr_form_screen(
     page: ft.Page, on_voltar, on_salvar, api_client, local_db,
-    print_service=None,
+    print_service=None, img_picker=None, cache=None,
 ):
     """Constroi o formulario de cadastro de CRR em formato carrossel"""
 
@@ -27,6 +26,99 @@ def build_crr_form_screen(
 
     credenciais = local_db.obter_credenciais()
     matricula_usuario = credenciais.get('identificador', '') if credenciais else ''
+
+    # Lista de enquadramentos pré-carregada no login (via cache dict)
+    _enquadramentos = (cache or {}).get('enquadramentos', [])
+
+    class EnqField:
+        """Campo de enquadramento com sugestões inline."""
+        def __init__(self, numero):
+            self._codigo = ""
+            self._disabled = False
+            self._numero = numero
+
+            self._sugestoes_col = ft.Column(
+                controls=[], spacing=0, visible=False,
+            )
+            self.text_field = ft.TextField(
+                label=f"Enquadramento {numero}",
+                hint_text="Digite o codigo (5 digitos)",
+                border_radius=8,
+                max_length=5,
+                keyboard_type=ft.KeyboardType.NUMBER,
+                on_change=self._on_change,
+                on_focus=self._on_focus,
+            )
+            self.control = ft.Column(
+                controls=[self.text_field, self._sugestoes_col],
+                spacing=0,
+            )
+
+        @property
+        def value(self):
+            return self._codigo
+
+        @value.setter
+        def value(self, v):
+            self._codigo = v
+            self.text_field.value = v
+
+        @property
+        def disabled(self):
+            return self._disabled
+
+        @disabled.setter
+        def disabled(self, v):
+            self._disabled = v
+            self.text_field.disabled = v
+
+        def _on_focus(self, e):
+            if not e.control.value and _enquadramentos:
+                self._mostrar_sugestoes("")
+
+        def _on_change(self, e):
+            valor = ''.join(c for c in (e.control.value or '') if c.isdigit())[:5]
+            if valor != e.control.value:
+                e.control.value = valor
+            self._codigo = valor
+            if _enquadramentos:
+                self._mostrar_sugestoes(valor)
+            else:
+                self._sugestoes_col.visible = False
+            page.update()
+
+        def _mostrar_sugestoes(self, query):
+            q = query.strip()
+            if len(q) >= 1:
+                filtrado = [
+                    enq for enq in _enquadramentos
+                    if q in str(enq.get('codigo', ''))
+                ][:5]
+            else:
+                filtrado = _enquadramentos[:5]
+
+            if filtrado:
+                self._sugestoes_col.controls = [
+                    ft.Container(
+                        content=ft.Text(
+                            f"{enq.get('codigo', '')} - {str(enq.get('descricao_infracao', ''))[:50]}",
+                            size=12,
+                        ),
+                        padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                        border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.GREY_300)),
+                        on_click=lambda ev, cod=str(enq.get('codigo', '')): self._selecionar(cod),
+                    )
+                    for enq in filtrado
+                ]
+                self._sugestoes_col.visible = True
+            else:
+                self._sugestoes_col.visible = False
+
+        def _selecionar(self, codigo):
+            self._codigo = codigo
+            self.text_field.value = codigo
+            self._sugestoes_col.visible = False
+            page.update()
 
     # ==================== FUNCOES DE MASCARA ==================== #
 
@@ -194,11 +286,7 @@ def build_crr_form_screen(
         return row
 
     def criar_campo_enquadramento(numero):
-        return ft.TextField(
-            label=f"Enquadramento {numero}", hint_text="5 digitos",
-            border_radius=8, max_length=5, on_change=aplicar_mascara_enquadramento,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        return EnqField(numero)
 
     ait_rows = [criar_campo_ait(1)]
     ait_container = ft.Column(controls=[ait_rows[0]], spacing=8)
@@ -215,13 +303,13 @@ def build_crr_form_screen(
     btn_add_ait = ft.TextButton("Adicionar AIT", icon=ft.Icons.ADD_CIRCLE_OUTLINE, on_click=adicionar_ait)
 
     enq_fields = [criar_campo_enquadramento(1)]
-    enq_container = ft.Column(controls=[enq_fields[0]], spacing=8)
+    enq_container = ft.Column(controls=[enq_fields[0].control], spacing=8)
 
     def adicionar_enquadramento(e):
         if len(enq_fields) < MAX_CAMPOS:
             novo = criar_campo_enquadramento(len(enq_fields) + 1)
             enq_fields.append(novo)
-            enq_container.controls.append(novo)
+            enq_container.controls.append(novo.control)
             if len(enq_fields) >= MAX_CAMPOS:
                 btn_add_enq.visible = False
             page.update()
@@ -266,7 +354,7 @@ def build_crr_form_screen(
 
     # Pagina 4: Outros Dados
     _AV_ODISSEU = "AV ODISSEU 750 - CANTO DO MAR - SAO SEBASTIAO/SP"
-    _R_BOLIVIA = "R. BOLIVIA 202 - JARAGUA - SAO SEBASTIAO/SP"
+    _R_BOLIVIA = "R BOLIVIA 202 - JARAGUA - SAO SEBASTIAO/SP"
     local_patio_opcao = ft.Dropdown(
         label="Local do Patio", value=_AV_ODISSEU,
         options=[
@@ -287,9 +375,10 @@ def build_crr_form_screen(
         read_only=True, border_radius=8, bgcolor=ft.Colors.GREY_100,
     )
     observacao = ft.TextField(
-        label="Observacao", multiline=True, min_lines=2, max_lines=4, border_radius=8,
+        label="Observacao *", multiline=True, min_lines=2, max_lines=4, border_radius=8,
         max_length=300,
         capitalization=ft.TextCapitalization.CHARACTERS, on_change=forcar_maiusculo,
+        hint_text="Minimo 10 caracteres",
     )
 
     # Pagina 5: Condutor
@@ -313,11 +402,11 @@ def build_crr_form_screen(
     situacao_entrega = ft.RadioGroup(
         value=None,
         content=ft.Column([
-            ft.Radio(value="Assinou e recebeu 2a via",
+            ft.Radio(value="assinou e recebeu 2a via",
                      label="Assinou e recebeu 2ª via"),
-            ft.Radio(value="Recusou assinar e recebeu 2a via",
+            ft.Radio(value="recusou assinar e recebeu 2a via",
                      label="Recusou assinar e recebeu 2ª via"),
-            ft.Radio(value="Recusou assinar e a receber 2a via",
+            ft.Radio(value="recusou assinar e a receber 2a via",
                      label="Recusou assinar e a receber 2ª via"),
         ], spacing=2),
     )
@@ -409,7 +498,7 @@ def build_crr_form_screen(
         )
 
     # Pagina 6: Imagens
-    MAX_IMAGENS = 4
+    MAX_IMAGENS = 8
     imagens_capturadas = []  # lista de dicts {path, base64}
 
     imagens_grid = ft.Column(controls=[], spacing=10)
@@ -425,7 +514,7 @@ def build_crr_form_screen(
                 content=ft.Row([
                     ft.Image(
                         src=img_data['base64'],
-                        width=72, height=72,
+                        width=60, height=60,
                         border_radius=6,
                     ),
                     ft.Text(f"Foto {i + 1}", size=13, expand=True, color=ft.Colors.GREY_800),
@@ -441,21 +530,17 @@ def build_crr_form_screen(
                 shadow=ft.BoxShadow(spread_radius=1, blur_radius=4, color=ft.Colors.with_opacity(0.12, ft.Colors.BLACK)),
             )
             novos_cards.append(card)
-        # Reatribuição dispara o rastreamento de mudanças do Flet
         imagens_grid.controls = novos_cards
         qtd = len(imagens_capturadas)
         btn_camera.visible = qtd < MAX_IMAGENS
         btn_galeria.visible = qtd < MAX_IMAGENS
         page.update()
 
-    img_picker = ImagePickerService()
-    page.services.append(img_picker)
-
     async def abrir_camera(e):
         if len(imagens_capturadas) >= MAX_IMAGENS:
             return
         try:
-            resultado = await img_picker.pick_image_camera(image_quality=85)
+            resultado = await img_picker.pick_image_camera(image_quality=90, max_width=1600, max_height=1600)
             if resultado:
                 imagens_capturadas.append({'path': resultado.name, 'base64': resultado.base64})
                 atualizar_grid_imagens()
@@ -471,7 +556,7 @@ def build_crr_form_screen(
         if len(imagens_capturadas) >= MAX_IMAGENS:
             return
         try:
-            resultado = await img_picker.pick_image_gallery(image_quality=85)
+            resultado = await img_picker.pick_image_gallery(image_quality=90, max_width=1600, max_height=1600)
             if resultado:
                 imagens_capturadas.append({'path': resultado.name, 'base64': resultado.base64})
                 atualizar_grid_imagens()
@@ -501,7 +586,7 @@ def build_crr_form_screen(
             content=ft.Column(controls=[
                 ft.Icon(ft.Icons.CAMERA_ALT, size=40, color=ft.Colors.DEEP_ORANGE),
                 ft.Text("Imagens", size=18, weight=ft.FontWeight.BOLD),
-                ft.Text("Capture ate 4 fotos (opcional)", size=12, color=ft.Colors.GREY_600),
+                ft.Text("Capture ate 8 fotos (minimo 4 obrigatorias)", size=12, color=ft.Colors.GREY_600),
                 ft.Container(height=5),
                 ft.Container(height=10),
                 ft.Row([btn_camera, btn_galeria], spacing=10),
@@ -512,6 +597,23 @@ def build_crr_form_screen(
         )
 
     revisao_content = ft.Column(controls=[], spacing=5, scroll=ft.ScrollMode.AUTO)
+
+    def mostrar_erros_dialogo(erros):
+        def fechar(ev):
+            dialogo.open = False
+            page.update()
+        dialogo = ft.AlertDialog(
+            title=ft.Text("Campos obrigatorios", color=ft.Colors.RED),
+            content=ft.Column(
+                controls=[ft.Text(f"• {e}", size=13) for e in erros],
+                spacing=6,
+                tight=True,
+            ),
+            actions=[ft.TextButton("OK", on_click=fechar)],
+        )
+        page.overlay.append(dialogo)
+        dialogo.open = True
+        page.update()
 
     def criar_pagina_revisao():
         return ft.Container(
@@ -662,10 +764,15 @@ def build_crr_form_screen(
                 erros.append("CPF do condutor e obrigatorio")
             if not situacao_entrega.value:
                 erros.append("Situacao de entrega e obrigatoria")
+        obs = (observacao.value or '').strip()
+        if not obs:
+            erros.append("Observacao e obrigatoria")
+        elif len(obs) < 10:
+            erros.append("Observacao deve ter no minimo 10 caracteres")
+        if len(imagens_capturadas) < 4:
+            erros.append("Minimo de 4 imagens obrigatorio")
         if erros:
-            status_text.value = "\n".join(erros)
-            status_text.color = ft.Colors.RED
-            page.update()
+            mostrar_erros_dialogo(erros)
             return False
         return True
 
@@ -705,67 +812,16 @@ def build_crr_form_screen(
             'aits': aits, 'enquadramentos': enquadramentos,
             'veiculoAbandonado': veiculo_abandonado.value,
             'imagens': [img['base64'] for img in imagens_capturadas],
-            'situacaoEntrega': 'Condutor ausente' if condutor_ausente.value else (situacao_entrega.value or ''),
+            'situacaoEntrega': 'condutor ausente' if condutor_ausente.value else (situacao_entrega.value or ''),
             'assinaturaCondutor': '',
         }
 
     dados_salvo = {}
 
-    def fechar_dialogo_salvo(ev):
-        if page.overlay:
-            page.overlay[-1].open = False
-        page.update()
-        on_salvar(dados_salvo, True)
-
-    def imprimir_crr_click(ev):
-        if page.overlay:
-            page.overlay[-1].open = False
-        page.update()
-
-        lines = gerar_linhas_impressao(dados_salvo)
-        sig_b64 = local_db.obter_config('assinatura_base64') or ''
-        condutor_sig = dados_salvo.get('assinaturaCondutor', '')
-
-        async def _imprimir():
-            await mostrar_dialogo_impressao(
-                page=page,
-                print_service=print_service,
-                lines=lines,
-                signature_base64=sig_b64,
-                condutor_signature_base64=condutor_sig,
-            )
-            on_salvar(dados_salvo, True)
-
-        page.run_task(_imprimir)
-
     def mostrar_dialogo_pos_salvar(dados):
         nonlocal dados_salvo
         dados_salvo = dados
-        numero = dados.get('numeroCrr', '')
-
-        acoes = [
-            ft.ElevatedButton(
-                "Imprimir", icon=ft.Icons.PRINT, on_click=imprimir_crr_click,
-                style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
-            ),
-            ft.TextButton("Fechar", on_click=fechar_dialogo_salvo),
-        ]
-
-        dlg = ft.AlertDialog(
-            title=ft.Row([
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=ft.Colors.GREEN, size=30),
-                ft.Text(f"CRR {numero}", size=16, weight=ft.FontWeight.BOLD),
-            ]),
-            content=ft.Column([
-                ft.Text("CRR salvo com sucesso!", size=14),
-                ft.Container(height=10),
-            ], tight=True),
-            actions=acoes,
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        page.overlay.append(dlg)
-        dlg.open = True
-        page.update()
+        on_salvar(dados_salvo, True)
 
     async def salvar_crr(e):
         if not validar_campos():
@@ -780,29 +836,31 @@ def build_crr_form_screen(
 
         try:
             resultado = await asyncio.to_thread(api_client.criar_crr, dados)
-            if resultado.get('sucesso'):
-                dados['numeroCrr'] = (
-                    resultado.get('crr', {}).get('numeroCrr', '')
-                    or resultado.get('numeroCrr', '')
-                )
-                status_text.value = f"CRR {dados['numeroCrr']} salvo!"
-                status_text.color = ft.Colors.GREEN
-                loading.visible = False
-                btn_salvar.disabled = False
-                page.update()
-                mostrar_dialogo_pos_salvar(dados)
-            else:
-                erro = resultado.get('erros', resultado.get('erro', 'Erro ao salvar'))
-                status_text.value = str(erro)
-                status_text.color = ft.Colors.RED
-                loading.visible = False
-                btn_salvar.disabled = False
-                page.update()
-        except Exception:
-            status_text.value = "Sem conexao com o servidor"
+        except Exception as ex:
+            status_text.value = f"Sem conexao com o servidor: {ex}"
             status_text.color = ft.Colors.RED
             loading.visible = False
             btn_salvar.disabled = False
+            page.update()
+            return
+
+        loading.visible = False
+
+        if resultado.get('sucesso'):
+            btn_salvar.disabled = True
+            dados['numeroCrr'] = (
+                resultado.get('crr', {}).get('numeroCrr', '')
+                or resultado.get('numeroCrr', '')
+            )
+            status_text.value = f"CRR {dados['numeroCrr']} salvo!"
+            status_text.color = ft.Colors.GREEN
+            page.update()
+            mostrar_dialogo_pos_salvar(dados)
+        else:
+            btn_salvar.disabled = False
+            erro = resultado.get('erros', resultado.get('erro', 'Erro ao salvar'))
+            status_text.value = str(erro)
+            status_text.color = ft.Colors.RED
             page.update()
 
     # ==================== BOTOES DE NAVEGACAO ==================== #

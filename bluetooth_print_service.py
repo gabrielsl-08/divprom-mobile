@@ -46,13 +46,17 @@ class BluetoothPrintService(Service):
         signature_base64: str = '',
         condutor_signature_base64: str = '',
         mac_address: str = '',
+        printer_type: str = '',
+        solucao: int = 2,
     ) -> dict:
         """
-        Envia cupom diretamente para a impressora Bluetooth via ESC/POS.
-        Interface identica ao AndroidPrintService.
+        Envia cupom diretamente para a impressora Bluetooth.
 
         Args:
             mac_address: MAC da impressora; se vazio usa self.mac_impressora.
+            printer_type: 'datecs' para DPP-250 (SDK Datecs), '' ou 'escpos'
+                          para impressoras genéricas (ESC/POS via RFCOMM).
+            solucao: 1 = ESC/POS padrao, 2 = Datecs com Master Reset apos imagens
 
         Returns:
             {'sucesso': True} ou {'sucesso': False, 'erro': str}
@@ -65,6 +69,8 @@ class BluetoothPrintService(Service):
                 "mac_address": mac,
                 "signature_base64": signature_base64 or '',
                 "qr_base64": _load_qr_base64(),
+                "printer_type": printer_type or '',
+                "solucao": solucao,
             },
             timeout=30,
         )

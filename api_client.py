@@ -96,8 +96,8 @@ class ApiClient:
                     'erro': f'Erro HTTP {response.status_code}'
                 }
 
-    def buscar_crrs(self, placa='', marca='', modelo='', data='') -> Dict[str, Any]:
-        """Busca CRRs por filtros: placa, marca, modelo, data."""
+    def buscar_crrs(self, placa='', marca='', modelo='', data='', numero_crr='') -> Dict[str, Any]:
+        """Busca CRRs por filtros: placa, marca, modelo, data, numeroCrr."""
         params = {}
         if placa:
             params['placa'] = placa
@@ -107,6 +107,8 @@ class ApiClient:
             params['modelo'] = modelo
         if data:
             params['data'] = data
+        if numero_crr:
+            params['numeroCrr'] = numero_crr
         with httpx.Client(timeout=self.timeout, verify=False) as client:
             response = client.get(
                 f"{self.base_url}/crr/buscar/",
@@ -118,7 +120,7 @@ class ApiClient:
     def atualizar_condutor_crr(self, crr_id: int, dados: Dict[str, Any]) -> Dict[str, Any]:
         """Atualiza situacaoEntrega e assinaturaCondutor de um CRR existente."""
         try:
-            with httpx.Client(timeout=30.0, verify=False) as client:
+            with httpx.Client(timeout=120.0, verify=False) as client:
                 response = client.patch(
                     f"{self.base_url}/crr/{crr_id}/atualizar-condutor/",
                     json=dados,
@@ -140,9 +142,27 @@ class ApiClient:
             )
             return response.json()
 
+    def enviar_email_condutor(self, crr_id: int, email: str) -> Dict[str, Any]:
+        """Envia email do CRR para o condutor."""
+        try:
+            with httpx.Client(
+                timeout=30.0, verify=False, http2=False,
+            ) as client:
+                response = client.post(
+                    f"{self.base_url}/crr/{crr_id}/enviar-email/",
+                    json={"email": email},
+                    headers=self._get_headers()
+                )
+                try:
+                    return response.json()
+                except Exception:
+                    return {'sucesso': False, 'erro': f'Erro HTTP {response.status_code}'}
+        except Exception as ex:
+            return {'sucesso': False, 'erro': f'Sem conexao: {type(ex).__name__}: {ex}'}
+
     def baixar_imagem_base64(self, url: str) -> str:
         """Baixa uma imagem da URL e retorna como string base64."""
         import base64
         with httpx.Client(timeout=30.0, verify=False) as client:
             r = client.get(url)
-            return base64.b64encode(r.content).decode('utf-8')
+        return base64.b64encode(r.content).decode('utf-8')

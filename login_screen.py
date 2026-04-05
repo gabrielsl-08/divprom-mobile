@@ -6,6 +6,7 @@ Fluxo:
   2. Proximas vezes: matricula + senha (valida no servidor)
   3. Se senha nao alterada: redireciona para tela de alteracao
 """
+import asyncio
 import flet as ft
 
 
@@ -65,7 +66,7 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
         visible=dispositivo_ativado,
     )
 
-    def fazer_login(e):
+    async def fazer_login(e):
         matricula = matricula_field.value.strip()
         senha = senha_field.value or ''
 
@@ -95,15 +96,16 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
         page.update()
 
         if not dispositivo_ativado:
-            _fazer_ativacao(matricula, senha)
+            await _fazer_ativacao(matricula, senha)
         else:
-            _fazer_login_normal(matricula, senha)
+            await _fazer_login_normal(matricula, senha)
 
-    def _fazer_ativacao(matricula, senha):
+    async def _fazer_ativacao(matricula, senha):
         codigo = codigo_field.value.strip()
         try:
-            resultado = api_client.ativar_dispositivo(codigo, matricula, senha)
-
+            resultado = await asyncio.to_thread(
+                api_client.ativar_dispositivo, codigo, matricula, senha
+            )
             if resultado.get('sucesso'):
                 dispositivo = resultado['dispositivo']
                 api_key = dispositivo.get('api_key', '')
@@ -123,22 +125,24 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
 
                 # Baixa e salva assinatura do agente
                 assinatura_url = resultado.get('assinatura_url')
+                print(f"[LOGIN] assinatura_url = {assinatura_url}")
                 if assinatura_url:
                     try:
-                        b64 = api_client.baixar_imagem_base64(assinatura_url)
+                        b64 = await asyncio.to_thread(
+                            api_client.baixar_imagem_base64, assinatura_url
+                        )
+                        print(f"[LOGIN] assinatura baixada, len={len(b64) if b64 else 0}")
                         local_db.salvar_config('assinatura_base64', b64)
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        print(f"[LOGIN] Erro ao baixar assinatura: {ex}")
 
                 status_text.value = "Dispositivo ativado!"
                 status_text.color = ft.Colors.GREEN
                 loading.visible = False
                 page.update()
 
-                import time
-                time.sleep(1)
+                await asyncio.sleep(1)
 
-                # Verifica se precisa alterar senha
                 if not resultado.get('senha_alterada', True):
                     on_senha_change_required(matricula)
                 else:
@@ -156,7 +160,7 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
             loading.visible = False
             page.update()
 
-    def _fazer_login_normal(matricula, senha):
+    async def _fazer_login_normal(matricula, senha):
         cred = local_db.obter_credenciais()
         if not cred or not cred.get('api_key'):
             status_text.value = "Dispositivo nao ativado"
@@ -166,8 +170,8 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
             return
 
         try:
-            resultado = api_client.validar_login(
-                cred['api_key'], matricula, senha
+            resultado = await asyncio.to_thread(
+                api_client.validar_login, cred['api_key'], matricula, senha
             )
             if not resultado.get('sucesso'):
                 erro = resultado.get('erro', 'Login invalido')
@@ -185,30 +189,30 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
 
         api_client.set_api_key(cred['api_key'])
         api_client.set_matricula(matricula)
-        # Atualiza matricula armazenada para o agente atual (qualquer agente pode usar qualquer dispositivo)
         local_db.salvar_config('identificador', matricula)
 
         from datetime import datetime
         local_db.salvar_config('sessao_inicio', datetime.now().isoformat())
 
-        # Baixa e salva assinatura do agente
         assinatura_url = resultado.get('agente', {}).get('assinatura_url')
+        print(f"[LOGIN] assinatura_url = {assinatura_url}")
         if assinatura_url:
             try:
-                b64 = api_client.baixar_imagem_base64(assinatura_url)
+                b64 = await asyncio.to_thread(
+                    api_client.baixar_imagem_base64, assinatura_url
+                )
+                print(f"[LOGIN] assinatura baixada, len={len(b64) if b64 else 0}")
                 local_db.salvar_config('assinatura_base64', b64)
-            except Exception:
-                pass
+            except Exception as ex:
+                print(f"[LOGIN] Erro ao baixar assinatura: {ex}")
 
         status_text.value = "Login realizado!"
         status_text.color = ft.Colors.GREEN
         loading.visible = False
         page.update()
 
-        import time
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
-        # Verifica se precisa alterar senha
         if not resultado.get('senha_alterada', True):
             on_senha_change_required(matricula)
         else:
@@ -225,7 +229,7 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
             ft.Container(
                 content=ft.Column([
                     ft.Icon(ft.Icons.DIRECTIONS_CAR, size=50, color=ft.Colors.WHITE),
-                    ft.Text("DivProm Mobile", size=22, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                    ft.Text("SYSTRAF-MOBILE", size=22, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                     ft.Text(subtitulo, size=11, color=ft.Colors.WHITE70),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
                 bgcolor=ft.Colors.BLUE,
@@ -261,7 +265,7 @@ def build_login_screen(page: ft.Page, on_login_success, on_senha_change_required
             ),
             ft.Container(expand=True),
             ft.Container(
-                content=ft.Text("v1.0 - DivProm 2025", size=10, color=ft.Colors.GREY_500),
+                content=ft.Text("v1.0 - SYSTRAF 2025", size=10, color=ft.Colors.GREY_500),
                 padding=ft.padding.only(bottom=15),
                 alignment=ft.Alignment(0, 0),
             ),

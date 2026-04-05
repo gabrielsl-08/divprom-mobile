@@ -13,8 +13,8 @@ LARGURA = 32
 _BASE_URL = "https://divprom.herokuapp.com"
 
 _ACCENT = str.maketrans(
-    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ°ª',
-    'AAAAEEEEEIIIIOOOOOUUUUCNaaaaeeeeeiiiiooooouuuucnoa'
+    'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ°ª\u00BA',
+    'AAAAEEEEEIIIIOOOOOUUUUCNaaaaeeeeeiiiiooooouuuucnoao'
 )
 
 
@@ -49,8 +49,17 @@ def _wrap_valor(label, valor, largura=LARGURA):
 def _secao(linhas, titulo, div):
     """Insere um subtitulo de secao entre linhas divisorias, centralizado."""
     linhas.append(div)
-    linhas.append(f"__CENTRO__{_T(titulo.upper())}")
+    linhas.append(_T(titulo.upper()))
     linhas.append(div)
+
+
+def _formatar_data(data_str):
+    """Converte AAAA-MM-DD para DD/MM/AAAA; retorna original se falhar."""
+    from datetime import datetime
+    try:
+        return datetime.strptime(data_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return data_str or '-'
 
 
 def gerar_linhas_impressao(dados):
@@ -65,13 +74,13 @@ def gerar_linhas_impressao(dados):
     )
 
     # === Titulo principal ===
-    linhas.append("__CENTRO__COMPROVANTE DE RECOLHIMENTO")
-    linhas.append("__CENTRO__E REMOCAO - CRR")
+    linhas.append("COMPROVANTE DE RECOLHIMENTO")
+    linhas.append("E REMOCAO - CRR")
 
     # === CRR / DATA / HORA ===
     _secao(linhas, "IDENTIFICACAO DO CRR", DIV)
     linhas += _wrap_valor("numero",  crr_num)
-    linhas += _wrap_valor("data",    dados.get('dataFiscalizacao', '-'))
+    linhas += _wrap_valor("data",    _formatar_data(dados.get('dataFiscalizacao', '-')))
     linhas += _wrap_valor("hora",    dados.get('horaFiscalizacao', '-'))
 
     # === Veiculo ===
@@ -94,9 +103,8 @@ def gerar_linhas_impressao(dados):
     enquadr = dados.get('enquadramentos', [])
     if enquadr:
         linhas += _wrap_valor("enquadr.", ', '.join(enquadr))
-
-    if dados.get('veiculoAbandonado', False):
-        linhas.append("  ART.279 - ABANDONADO")
+        if '00000' in enquadr:
+            linhas.append("  ART. 279-A")
 
     # === Outros dados ===
     _secao(linhas, "OUTROS DADOS", DIV)
@@ -106,27 +114,25 @@ def gerar_linhas_impressao(dados):
     linhas += _wrap_valor("agente",   dados.get('matriculaAgente', '-'))
     linhas.append("__AGENTE_SIG__")
 
-    # === Condutor ===
-    _secao(linhas, "CONDUTOR", DIV)
-    if dados.get('nomeCondutor'):
-        linhas += _wrap_valor("nome", dados.get('nomeCondutor', '-'))
-        linhas += _wrap_valor("cpf",  dados.get('cpfCondutor', '-'))
-    else:
-        linhas.append("ausente")
-
     if dados.get('observacao'):
         _secao(linhas, "OBSERVACAO", DIV)
         linhas += _wrap_valor("obs.", dados.get('observacao', ''))
 
-    # === Assinatura do condutor ===
-    linhas.append(DIV)
-    linhas.append("assinatura do condutor:")
-    linhas.append("__SPACER__")
-    linhas.append("_" * LARGURA)
-
-    situacao = dados.get('situacaoEntrega', '')
-    if situacao:
-        linhas.append(_T(situacao.upper()))
+    # === Condutor ===
+    _secao(linhas, "CONDUTOR", DIV)
+    tem_condutor = bool(dados.get('nomeCondutor'))
+    if tem_condutor:
+        linhas += _wrap_valor("nome", dados.get('nomeCondutor', '-'))
+        linhas += _wrap_valor("cpf",  dados.get('cpfCondutor', '-'))
+        linhas.append("")
+        linhas.append("assinatura do condutor:")
+        linhas.append("__CONDUTOR_SIG__")
+        linhas.append("_" * LARGURA)
+        situacao = dados.get('situacaoEntrega', '')
+        if situacao:
+            linhas.append(_T(situacao.upper()))
+    else:
+        linhas.append("ausente")
 
     # === QR Code ===
     linhas.append(DIV)

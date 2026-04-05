@@ -38,7 +38,7 @@ def build_home_screen(page: ft.Page, on_novo_crr, on_meus_crrs, on_logout, api_c
                     ft.Row([
                         ft.Icon(ft.Icons.DIRECTIONS_CAR, size=32, color=ft.Colors.WHITE),
                         ft.Column([
-                            ft.Text("DivProm Mobile", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                            ft.Text("SYSTRAF-MOBILE", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                             ft.Text(f"Agente: {nome_disp}", size=11, color=ft.Colors.WHITE70),
                         ], spacing=0, expand=True),
                         ft.IconButton(
@@ -94,7 +94,7 @@ def build_home_screen(page: ft.Page, on_novo_crr, on_meus_crrs, on_logout, api_c
 
             # Rodape
             ft.Container(
-                content=ft.Text("v1.0 - DivProm 2025", size=10, color=ft.Colors.GREY_500),
+                content=ft.Text("v1.0 - SYSTRAF 2025", size=10, color=ft.Colors.GREY_500),
                 padding=ft.padding.only(bottom=10),
                 alignment=ft.Alignment(0, 0),
             ),

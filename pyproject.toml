@@ -13,8 +13,8 @@ requires-python = ">=3.8"
 
 [tool.flet]
 # Informações do App
-app.name = "DivProm Mobile"
-app.short_name = "DivProm"
+app.name = "SYSTRAF-MOBILE"
+app.short_name = "SYSTRAF"
 app.version = "1.0.0"
 app.build_number = 1
 app.description = "Sistema de Cadastro de CRR para fiscalização de trânsito"
@@ -35,6 +35,10 @@ android.permissions = [
     "android.permission.READ_EXTERNAL_STORAGE",
     "android.permission.WRITE_EXTERNAL_STORAGE",
     "android.permission.READ_MEDIA_IMAGES",
+    "android.permission.BLUETOOTH",
+    "android.permission.BLUETOOTH_ADMIN",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.BLUETOOTH_SCAN",
 ]
 
 # Ícone do app (crie um PNG 512x512 em assets/icon.png)

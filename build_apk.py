@@ -27,6 +27,160 @@ flutter_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", 
 app_zip_path = os.path.join(flutter_dir, "app", "app.zip")
 app_zip_hash_path = os.path.join(flutter_dir, "app", "app.zip.hash")
 
+# Patch antecipado: flutter_bluetooth_serial namespace (se ja estiver no cache)
+def _patch_fbs_gradle():
+    _p = os.path.join(
+        os.environ.get('LOCALAPPDATA', ''),
+        'Pub', 'Cache', 'hosted', 'pub.dev',
+        'flutter_bluetooth_serial-0.4.0', 'android', 'build.gradle',
+    )
+    if not os.path.exists(_p):
+        return
+    with open(_p, 'r', encoding='utf-8') as _f:
+        _g = _f.read()
+    changed = False
+    if 'namespace' not in _g:
+        _g = _g.replace(
+            'android {',
+            'android {\n    namespace "io.github.edufolly.flutterbluetoothserial"', 1
+        )
+        changed = True
+        print("  -> flutter_bluetooth_serial build.gradle: namespace adicionado")
+    if 'compileSdkVersion 30' in _g:
+        _g = _g.replace('compileSdkVersion 30', 'compileSdkVersion 34')
+        changed = True
+        print("  -> flutter_bluetooth_serial build.gradle: compileSdkVersion 30->34")
+    if changed:
+        with open(_p, 'w', encoding='utf-8') as _f:
+            _f.write(_g)
+
+_patch_fbs_gradle()
+
+# Patch antecipado: datecs_printer namespace + compileSdk (se ja estiver no cache)
+def _patch_datecs_gradle():
+    _p = os.path.join(
+        os.environ.get('LOCALAPPDATA', ''),
+        'Pub', 'Cache', 'hosted', 'pub.dev',
+        'datecs_printer-0.0.5', 'android', 'build.gradle',
+    )
+    if not os.path.exists(_p):
+        return
+    with open(_p, 'r', encoding='utf-8') as _f:
+        _g = _f.read()
+    changed = False
+    if 'namespace' not in _g:
+        _g = _g.replace(
+            'android {',
+            'android {\n    namespace "com.rezins.datecs_printer"', 1
+        )
+        changed = True
+        print("  -> datecs_printer build.gradle: namespace adicionado")
+    if 'compileSdkVersion 30' in _g:
+        _g = _g.replace('compileSdkVersion 30', 'compileSdkVersion 34')
+        changed = True
+        print("  -> datecs_printer build.gradle: compileSdkVersion 30->34")
+    if changed:
+        with open(_p, 'w', encoding='utf-8') as _f:
+            _f.write(_g)
+
+_patch_datecs_gradle()
+
+# Patch antecipado: DatecsPrinterPlugin.java — envolver bloco de imagem em try/catch(Exception)
+# para que falha de decodificação de imagem não aborte o job de impressão inteiro
+def _patch_datecs_printer_java():
+    _p = os.path.join(
+        os.environ.get('LOCALAPPDATA', ''),
+        'Pub', 'Cache', 'hosted', 'pub.dev',
+        'datecs_printer-0.0.5', 'android', 'src', 'main', 'java',
+        'com', 'rezins', 'datecs_printer', 'DatecsPrinterPlugin.java',
+    )
+    if not os.path.exists(_p):
+        return
+    with open(_p, 'r', encoding='utf-8') as _f:
+        _j = _f.read()
+    if 'sig%2021' in _j:
+        return  # ja aplicado com handler de assinatura
+    _old = (
+        '          }else if(args.get(i).contains("img%2021")){\n'
+        '            String[] split = args.get(i).split("%2021");\n'
+        '            String img = split[1];\n'
+        '            if(android.os.Build.VERSION.SDK_INT >= 26){\n'
+        '              byte[] decodedString = Base64.getDecoder().decode(img.getBytes("UTF-8"));\n'
+        '              Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);\n'
+        '              Bitmap resized = Bitmap.createScaledBitmap(decodedByte, 300, 300, true);\n'
+        '              final int[] argb = new int[300 * 300];\n'
+        '              resized.getPixels(argb, 0, 300, 0, 0, 300, 300);\n'
+        '              resized.recycle();\n'
+        '\n'
+        '              mPrinter.printImage(argb, 300, 300, Printer.ALIGN_CENTER, true);\n'
+        '            }else{\n'
+        '              byte[] decodedString = android.util.Base64.decode(img, android.util.Base64.DEFAULT);\n'
+        '              Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);\n'
+        '              Bitmap resized = Bitmap.createScaledBitmap(decodedByte, 300, 300, true);\n'
+        '              final int[] argb = new int[300 * 300];\n'
+        '              resized.getPixels(argb, 0, 300, 0, 0, 300, 300);\n'
+        '              resized.recycle();\n'
+        '              mPrinter.printImage(argb, 300, 300, Printer.ALIGN_CENTER, true);\n'
+        '            }\n'
+        '          }else{'
+    )
+    _new = (
+        '          }else if(args.get(i).contains("sig%2021")){\n'
+        '            try {\n'
+        '              String[] split = args.get(i).split("%2021");\n'
+        '              String img = split[1];\n'
+        '              byte[] decodedBytes;\n'
+        '              if(android.os.Build.VERSION.SDK_INT >= 26){\n'
+        '                decodedBytes = Base64.getDecoder().decode(img.getBytes("UTF-8"));\n'
+        '              } else {\n'
+        '                decodedBytes = android.util.Base64.decode(img, android.util.Base64.DEFAULT);\n'
+        '              }\n'
+        '              Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.length);\n'
+        '              if (decodedByte != null) {\n'
+        '                Bitmap resized = Bitmap.createScaledBitmap(decodedByte, 280, 120, true);\n'
+        '                decodedByte.recycle();\n'
+        '                final int[] argb = new int[280 * 120];\n'
+        '                resized.getPixels(argb, 0, 280, 0, 0, 280, 120);\n'
+        '                resized.recycle();\n'
+        '                mPrinter.printImage(argb, 280, 120, Printer.ALIGN_LEFT, true);\n'
+        '              }\n'
+        '            } catch (Exception sigEx) {\n'
+        '              android.util.Log.w("DatecsPrinter", "sig skip: " + sigEx.getMessage());\n'
+        '            }\n'
+        '          }else if(args.get(i).contains("img%2021")){\n'
+        '            try {\n'
+        '              String[] split = args.get(i).split("%2021");\n'
+        '              String img = split[1];\n'
+        '              byte[] decodedBytes;\n'
+        '              if(android.os.Build.VERSION.SDK_INT >= 26){\n'
+        '                decodedBytes = Base64.getDecoder().decode(img.getBytes("UTF-8"));\n'
+        '              } else {\n'
+        '                decodedBytes = android.util.Base64.decode(img, android.util.Base64.DEFAULT);\n'
+        '              }\n'
+        '              Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.length);\n'
+        '              if (decodedByte != null) {\n'
+        '                Bitmap resized = Bitmap.createScaledBitmap(decodedByte, 300, 300, true);\n'
+        '                decodedByte.recycle();\n'
+        '                final int[] argb = new int[300 * 300];\n'
+        '                resized.getPixels(argb, 0, 300, 0, 0, 300, 300);\n'
+        '                resized.recycle();\n'
+        '                mPrinter.printImage(argb, 300, 300, Printer.ALIGN_CENTER, true);\n'
+        '              }\n'
+        '            } catch (Exception imgEx) {\n'
+        '              android.util.Log.w("DatecsPrinter", "img skip: " + imgEx.getMessage());\n'
+        '            }\n'
+        '          }else{'
+    )
+    if _old in _j:
+        _j = _j.replace(_old, _new)
+        with open(_p, 'w', encoding='utf-8') as _f:
+            _f.write(_j)
+        print("  -> DatecsPrinterPlugin.java: patch aplicado (sig 280x120 + img 300x300)")
+    else:
+        print("  -> DatecsPrinterPlugin.java: bloco de imagem nao encontrado")
+
+_patch_datecs_printer_java()
+
 # Remover arquivos Dart de extensoes extras do flutter/lib antes da FASE 1
 # (podem estar desatualizados de um build anterior e causar erro de compilacao)
 _lib_dir = os.path.join(flutter_dir, "lib")
@@ -211,40 +365,41 @@ if os.path.exists(manifest_path):
     else:
         print("  -> AndroidManifest.xml ja esta correto")
 
-# 2a. Adicionar pacotes extras ao pubspec.yaml (se ainda nao estiverem)
+# 2a. Adicionar pacotes extras ao pubspec.yaml
+# Usa serious_python como ancora (sempre presente no pubspec gerado pelo Flet)
+import re as _re2
+extra_packages = [
+    "  image_picker: ^1.1.2",
+    "  pdf: ^3.11.0",
+    "  printing: ^5.13.1",
+    "  datecs_printer: ^0.0.5",
+]
+# Remove pacotes BT antigos se existirem
+pubspec = _re2.sub(r'\n\s*blue_thermal_printer: \S+', '', pubspec)
+pubspec = _re2.sub(r'\n\s*flutter_bluetooth_serial: \S+', '', pubspec)
+
 pubspec_changed = False
-if "image_picker" not in pubspec:
-    pubspec = pubspec.replace(
-        "  file_picker: ^10.3.10",
-        "  file_picker: ^10.3.10\n  image_picker: ^1.1.2"
-    )
-    pubspec_changed = True
-if "  pdf:" not in pubspec:
-    anchor = "  image_picker: ^1.1.2" if "  image_picker:" in pubspec else "  file_picker: ^10.3.10"
-    pubspec = pubspec.replace(anchor, anchor + "\n  pdf: ^3.11.0")
-    pubspec_changed = True
-if "  printing:" not in pubspec:
-    pubspec = pubspec.replace(
-        "  pdf: ^3.11.0",
-        "  pdf: ^3.11.0\n  printing: ^5.13.1"
-    )
-    pubspec_changed = True
-if "flutter_bluetooth_serial" not in pubspec:
-    import re as _re2
-    # Remove pacotes BT anteriores
-    pubspec = _re2.sub(r'\n\s*blue_thermal_printer: \S+', '', pubspec)
-    pubspec = _re2.sub(r'\n\s*datecs_printer: \S+', '', pubspec)
-    pubspec = pubspec.replace(
-        "  printing: ^5.13.1",
-        "  printing: ^5.13.1\n  flutter_bluetooth_serial: ^0.4.0"
-    )
-    pubspec_changed = True
+for pkg_line in extra_packages:
+    pkg_name = pkg_line.strip().split(":")[0]
+    if pkg_name not in pubspec:
+        # Insere apos serious_python
+        pubspec = _re2.sub(
+            r'(  serious_python: \S+)',
+            r'\1\n' + pkg_line,
+            pubspec,
+        )
+        pubspec_changed = True
+
 if pubspec_changed:
     with open(pubspec_path, "w", encoding="utf-8") as f:
         f.write(pubspec)
-    print("  -> pubspec.yaml atualizado com novos pacotes (pdf, printing)")
+    print("  -> pubspec.yaml atualizado com pacotes extras")
+    # Mostrar dependencias finais
+    for line in pubspec.splitlines():
+        if line.startswith("  ") and ":" in line and not line.startswith("    "):
+            print(f"     {line.strip()}")
 else:
-    print("  -> pubspec.yaml ja esta correto")
+    print("  -> pubspec.yaml ja contem todos os pacotes")
 
 # 2b. Criar servico Dart para image_picker
 service_code = r'''import 'dart:convert';
@@ -457,23 +612,25 @@ with open(android_service_dart_path, "w", encoding="utf-8") as f:
     f.write(android_print_service_code)
 print("  -> android_print_service.dart criado")
 
-# 2b3. Criar servico Dart para Bluetooth ESC/POS direto
+# 2b3. Criar servico Dart para Bluetooth (DPP-250 via Datecs SDK, outros via ESC/POS)
 bluetooth_service_dart_path = os.path.join(flutter_dir, "lib", "bluetooth_printer_service.dart")
 bluetooth_service_code = r'''import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flet/flet.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:datecs_printer/datecs_printer.dart';
 
 class BluetoothPrinterFletService extends FletService {
   BluetoothPrinterFletService({required super.control});
+
+  static const MethodChannel _rfcomm = MethodChannel('com.divprom/rfcomm');
 
   @override
   void init() {
     super.init();
     control.addInvokeMethodListener(_invokeMethod);
-    debugPrint("BluetoothPrinterFletService (ESC/POS) initialized");
+    debugPrint("BluetoothPrinterFletService (Datecs) initialized");
   }
 
   @override
@@ -495,11 +652,10 @@ class BluetoothPrinterFletService extends FletService {
 
   Future<dynamic> _listarPareados() async {
     try {
-      List<BluetoothDevice> devices =
-          await FlutterBluetoothSerial.instance.getBondedDevices();
-      return devices.map((d) => {
-        "nome": d.name ?? "",
-        "mac": d.address,
+      final List<dynamic> devices = await _rfcomm.invokeMethod('list_paired');
+      return devices.map((d) {
+        final m = d as Map;
+        return {"nome": m['nome']?.toString() ?? '', "mac": m['mac']?.toString() ?? ''};
       }).toList();
     } catch (e) {
       debugPrint("Erro ao listar pareados: $e");
@@ -507,168 +663,95 @@ class BluetoothPrinterFletService extends FletService {
     }
   }
 
-  // ── ESC/POS constants ─────────────────────────────────────────────────────
-  static const List<int> _INIT     = [0x1B, 0x40];
-  static const List<int> _ALIGN_L  = [0x1B, 0x61, 0x00];
-  static const List<int> _ALIGN_C  = [0x1B, 0x61, 0x01];
-  static const List<int> _BOLD_ON  = [0x1B, 0x45, 0x01];
-  static const List<int> _BOLD_OFF = [0x1B, 0x45, 0x00];
-  static const List<int> _LF      = [0x0A];
-  static const List<int> _CUT     = [0x1D, 0x56, 0x42, 0x03];
-  static List<int> _feedLines(int n) => [0x1B, 0x64, n];
-
-  List<int> _encode(String text) =>
-      text.codeUnits.map((c) => c > 255 ? 63 : c).toList();
-
-  List<int> _textLine(String text, {bool center = false, bool bold = false}) {
-    final List<int> buf = [];
-    if (center) buf.addAll(_ALIGN_C);
-    if (bold) buf.addAll(_BOLD_ON);
-    buf.addAll(_encode(text));
-    buf.addAll(_LF);
-    if (bold) buf.addAll(_BOLD_OFF);
-    if (center) buf.addAll(_ALIGN_L);
-    return buf;
-  }
-
-  // ── Image → ESC/POS raster (GS v 0) ──────────────────────────────────────
-  Future<List<int>> _imageToEscpos(String base64Str,
-      {int? targetWidth, int? targetHeight}) async {
-    try {
-      final Uint8List bytes = base64Decode(base64Str);
-      final ui.Codec codec = await ui.instantiateImageCodec(
-        bytes,
-        targetWidth: targetWidth,
-        targetHeight: targetHeight,
-      );
-      final ui.FrameInfo fi = await codec.getNextFrame();
-      final int w = fi.image.width;
-      final int h = fi.image.height;
-      final ByteData? bd =
-          await fi.image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      fi.image.dispose();
-      if (bd == null) return [];
-
-      final Uint8List rgba = bd.buffer.asUint8List();
-      final int bytesPerRow = (w + 7) ~/ 8;
-      final List<int> bitmap = [];
-
-      for (int y = 0; y < h; y++) {
-        for (int bx = 0; bx < bytesPerRow; bx++) {
-          int byte = 0;
-          for (int bit = 0; bit < 8; bit++) {
-            final int px = bx * 8 + bit;
-            if (px < w) {
-              final int offset = (y * w + px) * 4;
-              final int r = rgba[offset];
-              final int g = rgba[offset + 1];
-              final int b = rgba[offset + 2];
-              final int lum = (r * 299 + g * 587 + b * 114) ~/ 1000;
-              if (lum < 128) byte |= (0x80 >> bit);
-            }
-          }
-          bitmap.add(byte);
-        }
-      }
-
-      return [
-        0x1D, 0x76, 0x30, 0x00,
-        bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF,
-        h & 0xFF, (h >> 8) & 0xFF,
-        ...bitmap,
-      ];
-    } catch (e) {
-      debugPrint("Erro ao converter imagem ESC/POS: $e");
-      return [];
-    }
-  }
-
-  Future<List<int>> _sigToEscpos(String base64Str) async {
-    try {
-      final Uint8List bytes = base64Decode(base64Str);
-      final ui.Codec c1 = await ui.instantiateImageCodec(bytes);
-      final ui.FrameInfo f1 = await c1.getNextFrame();
-      final int origW = f1.image.width;
-      final int origH = f1.image.height;
-      f1.image.dispose();
-      return await _imageToEscpos(base64Str,
-          targetWidth: (origW * 0.5).round(),
-          targetHeight: (origH * 0.33).round());
-    } catch (_) {
-      return [];
-    }
-  }
-
-  // ── Print receipt ─────────────────────────────────────────────────────────
+  // ── Sempre usa protocolo Datecs com Master Reset (ESC @) ──────────────────
   Future<dynamic> _printReceipt(dynamic args) async {
     final String mac = (args["mac_address"] ?? "").toString().toUpperCase();
     final List<dynamic> lines = args["lines"] ?? [];
     final String agentSig = (args["signature_base64"] ?? "").toString();
+    final String condutorSig = (args["condutor_signature_base64"] ?? "").toString();
     final String qrBase64 = (args["qr_base64"] ?? "").toString();
 
     if (mac.isEmpty) {
       return {"sucesso": false, "erro": "MAC da impressora nao configurado"};
     }
 
-    BluetoothConnection? conn;
     try {
-      conn = await BluetoothConnection.toAddress(mac);
-      await Future.delayed(const Duration(milliseconds: 300));
+      try { await DatecsPrinter.disconnect; } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 400));
 
-      final List<int> buf = [];
-      buf.addAll(_INIT);
-      buf.addAll(_ALIGN_L);
+      final bool connected = await DatecsPrinter.connectBluetooth(mac) ?? false;
+      if (!connected) {
+        return {"sucesso": false, "erro": "Nao foi possivel conectar a impressora"};
+      }
+      await Future.delayed(const Duration(milliseconds: 800));
 
+      final DatecsGenerate gen = DatecsGenerate(DatecsPaper.mm58);
+      
       for (final line in lines) {
         final String s = line.toString();
-
+        
+        // SOLUCAO 2: Detectar tokens de imagem e aplicar Master Reset apos
         if (s == "__AGENTE_SIG__") {
-          if (agentSig.isNotEmpty) buf.addAll(await _sigToEscpos(agentSig));
-          buf.addAll(_feedLines(2));
-
-        } else if (s == "__SPACER__") {
-          buf.addAll(_feedLines(3));
-
-        } else if (s == "__QR_STATIC__") {
-          if (qrBase64.isNotEmpty) {
-            buf.addAll(await _imageToEscpos(qrBase64, targetWidth: 200));
+          if (agentSig.isNotEmpty) {
+            gen.args.add("sig%2021" + agentSig);
           }
-
+          // Master Reset apos imagem (ESC @)
+          gen.textPrint("\x1B\x40");
+          gen.feed(2);
+          
+        } else if (s == "__CONDUTOR_SIG__") {
+          if (condutorSig.isNotEmpty) {
+            gen.args.add("sig%2021" + condutorSig);
+          }
+          // Master Reset apos imagem (ESC @)
+          gen.textPrint("\x1B\x40");
+          gen.feed(2);
+          
+        } else if (s == "__QR_STATIC__" || s == "__QR_CODE__") {
+          if (qrBase64.isNotEmpty) {
+            gen.image(qrBase64);
+          }
+          // Master Reset apos imagem (ESC @)
+          gen.textPrint("\x1B\x40");
+          gen.feed(2);
+          
+        } else if (s == "__SPACER__") {
+          gen.feed(3);
+          
         } else if (s.startsWith("__CENTRO__")) {
-          buf.addAll(_textLine(s.substring(10), center: true, bold: true));
-
+          gen.textPrint(s.substring(10),
+              style: DatecsStyle(align: DatecsAlign.center, bold: true));
+              
         } else if (s.isNotEmpty &&
             s.split('').every((c) => c == s[0]) &&
             '-=_'.contains(s[0])) {
-          buf.addAll(_encode(s));
-          buf.addAll(_LF);
-
+          gen.hr(char: s[0]);
+          
         } else if (s.trim().isEmpty) {
-          buf.addAll(_LF);
-
+          gen.feed(1);
+          
         } else {
-          buf.addAll(_encode(s));
-          buf.addAll(_LF);
+          gen.textPrint(s);
         }
       }
+      
+      gen.feed(5);
 
-      buf.addAll(_feedLines(5));
-      buf.addAll(_CUT);
+      final dynamic printResult = await DatecsPrinter.printText(gen.args);
+      try { await DatecsPrinter.disconnect; } catch (_) {}
 
-      conn.output.add(Uint8List.fromList(buf));
-      await conn.output.allSent;
-      await Future.delayed(const Duration(milliseconds: 500));
-
+      if (printResult == false) {
+        return {"sucesso": false, "erro": "Impressora nao confirmou a impressao"};
+      }
       return {"sucesso": true};
+      
     } catch (e) {
-      debugPrint("Erro ao imprimir via BT ESC/POS: $e");
+      debugPrint("Erro ao imprimir via Datecs: $e");
       final msg = e.toString().toLowerCase();
-      if (msg.contains("connect") || msg.contains("socket") || msg.contains("host")) {
+      if (msg.contains("connect") || msg.contains("ioexception") || msg.contains("read failed")) {
         return {"sucesso": false, "erro": "Impressora desligada ou fora de alcance"};
       }
       return {"sucesso": false, "erro": "Erro: ${e.toString().split("\n").first}"};
-    } finally {
-      try { conn?.dispose(); } catch (_) {}
     }
   }
 }
@@ -742,17 +825,141 @@ if os.path.exists(_fbs_gradle):
     if 'namespace' not in _fbsg:
         _fbsg = _fbsg.replace(
             'android {',
-            'android {\n    namespace "com.dexterx.flutter_bluetooth_serial"', 1
+            'android {\n    namespace "io.github.edufolly.flutterbluetoothserial"', 1
         )
+        _fbsg_changed = True
+    if 'compileSdkVersion 30' in _fbsg:
+        _fbsg = _fbsg.replace('compileSdkVersion 30', 'compileSdkVersion 34')
         _fbsg_changed = True
     if _fbsg_changed:
         with open(_fbs_gradle, 'w', encoding='utf-8') as _f:
             _f.write(_fbsg)
-        print("  -> flutter_bluetooth_serial build.gradle corrigido (namespace)")
+        print("  -> flutter_bluetooth_serial build.gradle corrigido (namespace + compileSdk)")
     else:
         print("  -> flutter_bluetooth_serial build.gradle ja esta correto")
 else:
     print(f"  -> AVISO: flutter_bluetooth_serial nao encontrado no pub cache")
+
+# 2c3. Patch datecs_printer: namespace + compileSdk no build.gradle
+_dt_gradle = os.path.join(
+    os.environ.get('LOCALAPPDATA', ''),
+    'Pub', 'Cache', 'hosted', 'pub.dev',
+    'datecs_printer-0.0.5', 'android', 'build.gradle',
+)
+if os.path.exists(_dt_gradle):
+    with open(_dt_gradle, 'r', encoding='utf-8') as _f:
+        _dtg = _f.read()
+    _dtg_changed = False
+    if 'namespace' not in _dtg:
+        _dtg = _dtg.replace(
+            'android {',
+            'android {\n    namespace "com.rezins.datecs_printer"', 1
+        )
+        _dtg_changed = True
+    if 'compileSdkVersion 30' in _dtg:
+        _dtg = _dtg.replace('compileSdkVersion 30', 'compileSdkVersion 34')
+        _dtg_changed = True
+    if _dtg_changed:
+        with open(_dt_gradle, 'w', encoding='utf-8') as _f:
+            _f.write(_dtg)
+        print("  -> datecs_printer build.gradle corrigido (namespace + compileSdk)")
+    else:
+        print("  -> datecs_printer build.gradle ja esta correto")
+else:
+    print(f"  -> AVISO: datecs_printer nao encontrado no pub cache")
+
+# 2c4. Injetar RfcommEscPos.kt e modificar MainActivity.kt (canal RFCOMM nativo)
+import xml.etree.ElementTree as _et
+try:
+    _mf_tree = _et.parse(manifest_path)
+    _pkg = _mf_tree.getroot().get('package') or 'com.flet.divprom_mobile'
+except Exception:
+    _pkg = 'com.flet.divprom_mobile'
+_pkg_path = _pkg.replace('.', '/')
+_kt_base = os.path.join(flutter_dir, "android", "app", "src", "main", "kotlin")
+_src_dir = os.path.join(_kt_base, _pkg_path)
+if not os.path.exists(_src_dir):
+    _java_base = os.path.join(flutter_dir, "android", "app", "src", "main", "java")
+    _src_dir = os.path.join(_java_base, _pkg_path)
+
+if os.path.exists(_src_dir):
+    _rfcomm_kt = f"""package {_pkg}
+
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothSocket
+import java.io.IOException
+import java.util.UUID
+
+object RfcommEscPos {{
+    private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
+    fun listPaired(): List<Map<String, Any>> {{
+        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
+        return adapter.bondedDevices.map {{ d ->
+            mapOf<String, Any>("nome" to (d.name ?: ""), "mac" to d.address)
+        }}
+    }}
+
+    @Throws(IOException::class)
+    fun print(mac: String, data: ByteArray) {{
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+            ?: throw IOException("Bluetooth nao disponivel")
+        if (!adapter.isEnabled) throw IOException("Bluetooth desligado")
+        adapter.cancelDiscovery()
+        val socket: BluetoothSocket =
+            adapter.getRemoteDevice(mac.uppercase())
+                   .createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+        try {{
+            socket.connect()
+            socket.outputStream.write(data)
+            socket.outputStream.flush()
+            Thread.sleep(2000)
+        }} finally {{
+            try {{ socket.close() }} catch (_: Exception) {{}}
+        }}
+    }}
+}}
+"""
+    with open(os.path.join(_src_dir, "RfcommEscPos.kt"), 'w', encoding='utf-8') as _f:
+        _f.write(_rfcomm_kt)
+    print(f"  -> RfcommEscPos.kt criado (pkg: {_pkg})")
+
+    _main_activity_path = os.path.join(_src_dir, "MainActivity.kt")
+    _main_activity_new = f"""package {_pkg}
+
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {{
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.divprom/rfcomm")
+            .setMethodCallHandler {{ call, result ->
+                when (call.method) {{
+                    "list_paired" -> result.success(RfcommEscPos.listPaired())
+                    "print_escpos" -> Thread {{
+                        try {{
+                            RfcommEscPos.print(
+                                call.argument<String>("mac") ?: "",
+                                call.argument<ByteArray>("data") ?: ByteArray(0)
+                            )
+                            result.success(true)
+                        }} catch (e: Exception) {{
+                            result.error("RFCOMM_ERROR", e.message, null)
+                        }}
+                    }}.start()
+                    else -> result.notImplemented()
+                }}
+            }}
+    }}
+}}
+"""
+    with open(_main_activity_path, 'w', encoding='utf-8') as _f:
+        _f.write(_main_activity_new)
+    print(f"  -> MainActivity.kt modificado com canal RFCOMM")
+else:
+    print(f"  -> AVISO: diretorio Kotlin nao encontrado: {_src_dir}")
 
 # 2d. Restaurar app.zip corrigido (caso flutter build o recrie)
 shutil.copy2(app_zip_backup, app_zip_path)
@@ -769,6 +976,15 @@ env = os.environ.copy()
 if sp_dirs:
     env["SERIOUS_PYTHON_SITE_PACKAGES"] = sp_dirs[0]
     print(f"  -> SERIOUS_PYTHON_SITE_PACKAGES={sp_dirs[0]}")
+
+print("  -> Executando flutter pub get...")
+pub_result = subprocess.run(
+    [os.path.join(flutter_path, "flutter.bat"), "pub", "get"],
+    cwd=flutter_dir,
+    env=env,
+)
+if pub_result.returncode != 0:
+    print("AVISO: flutter pub get falhou, tentando build mesmo assim")
 
 result = subprocess.run(
     [os.path.join(flutter_path, "flutter.bat"), "build", "apk", "--release"],

@@ -4,6 +4,7 @@ Diálogo de seleção de impressora Bluetooth para impressão de CRR.
 Usa BluetoothPrintService (blue_thermal_printer via Dart) para listar
 dispositivos BT pareados e imprimir após seleção do usuário.
 """
+import asyncio
 import flet as ft
 
 
@@ -38,11 +39,23 @@ async def mostrar_dialogo_impressao(
     if not print_service:
         return
 
-    dlg = ft.AlertDialog(modal=True, title=ft.Text("Impressora Bluetooth"))
+    fechado = asyncio.Event()
+    dlg = ft.AlertDialog(
+        modal=True,
+        title=ft.Row([
+            ft.Text("Impressora Bluetooth", expand=True),
+            ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                icon_size=20,
+                on_click=lambda e: _fechar(),
+            ),
+        ]),
+    )
 
     def _fechar():
         dlg.open = False
         page.update()
+        fechado.set()
 
     # Estado inicial: buscando dispositivos
     dlg.content = ft.Column(
@@ -86,6 +99,7 @@ async def mostrar_dialogo_impressao(
         )
         dlg.actions = [ft.TextButton("Fechar", on_click=lambda e: _fechar())]
         page.update()
+        await fechado.wait()
         return
 
     # Monta lista de dispositivos para seleção
@@ -105,12 +119,16 @@ async def mostrar_dialogo_impressao(
         dlg.actions = []
         page.update()
 
+        # Usar protocolo Datecs para ambas as impressoras (com Master Reset)
+        _tipo = "datecs"
+
         try:
             resultado = await print_service.print_receipt(
                 lines=lines,
                 signature_base64=signature_base64,
                 condutor_signature_base64=condutor_signature_base64,
                 mac_address=mac,
+                printer_type=_tipo,
             )
             if isinstance(resultado, dict):
                 sucesso = resultado.get("sucesso", False)
@@ -168,3 +186,4 @@ async def mostrar_dialogo_impressao(
     )
     dlg.actions = [ft.TextButton("Cancelar", on_click=lambda e: _fechar())]
     page.update()
+    await fechado.wait()
